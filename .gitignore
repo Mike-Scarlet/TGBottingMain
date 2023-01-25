@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyd
+*.html
+*.pkl
+*.json
+*.mp4
+*.txt
+*.session
+*journal
+!requirements.txt
+
+workspace/
