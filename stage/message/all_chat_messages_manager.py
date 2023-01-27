@@ -9,14 +9,14 @@ class AllChatMessageManager:
     self._chat_id_message_manager_dict = {}
     self._chat_id_message_manager_dict_access_lock = asyncio.Lock()
 
-  def GeneralHistoryRetrieve(self, chat_id):
+  async def GeneralHistoryRetrieve(self, chat_id):
     pass
 
-  def ManualMessageDispatch(self, manual_message):
+  async def ChatAllHistoryHandler(self, chat_id, reload=False):
     pass
 
-  def ChatAllHistoryHandler(self):
+  async def CallbackMessageHandler(self):
     pass
 
-  def CallbackMessageHandler(self):
+  async def ManualMessageDispatch(self, manual_message):
     pass
