@@ -1,16 +1,22 @@
 
 from core.telegram_session_config import *
+from utils.python_container_utils import RemoveNoneItemFromDict
 import pyrogram
 import asyncio
 import logging
+import os
 
 class TelegramSession:
-  def __init__(self, sess_config) -> None:
+  def __init__(self, sess_config: TelegramSessionConfig) -> None:
     param_dict = {
       "api_id": sess_config.api_id,
       "api_hash": sess_config.api_hash,
-      "workdir": sess_config.work_dir,
+      "workdir": sess_config.workdir,
+      "phone_number": sess_config.phone_number,
     }
+    RemoveNoneItemFromDict(param_dict)
+    if "workdir" in param_dict:
+      os.makedirs(param_dict["workdir"], exist_ok=True)
     self.client = pyrogram.Client(
       "telegram_local_bot",
       **param_dict
@@ -19,29 +25,29 @@ class TelegramSession:
     self.loop = asyncio.get_event_loop()
     self.logger = logging.getLogger("TelegramSession")
 
-  def RunCoroutine(self, cor):
-    return self.loop.run_until_complete(cor)
+  # def RunCoroutine(self, cor):
+  #   return self.loop.run_until_complete(cor)
 
-  def ScheduleCoroutine(self, cor):
-    return self.loop.create_task(cor)
+  # def ScheduleCoroutine(self, cor):
+  #   return self.loop.create_task(cor)
 
-  def StartSession(self):
-    """ start a telegram session, you must call this before using any other functions """
-    async def StartClient(client: pyrogram.client):
-      await client.start()
-    self.logger.info("starting telegram session ...")
-    self.RunCoroutine(StartClient(self.client))
-    self.logger.info("telegram session started.")
+  # def StartSession(self):
+  #   """ start a telegram session, you must call this before using any other functions """
+  #   async def StartClient(client: pyrogram.client):
+  #     await client.start()
+  #   self.logger.info("starting telegram session ...")
+  #   self.RunCoroutine(StartClient(self.client))
+  #   self.logger.info("telegram session started.")
   
-  def ListAllDialogs(self):
-    """ a helpful function to get all dialogs and their id """
-    async def GetAllDialogsInternal(client: pyrogram.client):
-      async for dialog in client.get_dialogs():
-        chat_name = dialog.chat.first_name or dialog.chat.title
-        chat_id = dialog.chat.id
-        print("{}: {}".format(chat_name, chat_id))
-    self.logger.info("retrieving dialogs ...")
-    self.RunCoroutine(GetAllDialogsInternal(self.client))
+  # def ListAllDialogs(self):
+  #   """ a helpful function to get all dialogs and their id """
+  #   async def GetAllDialogsInternal(client: pyrogram.client):
+  #     async for dialog in client.get_dialogs():
+  #       chat_name = dialog.chat.first_name or dialog.chat.title
+  #       chat_id = dialog.chat.id
+  #       print("{}: {}".format(chat_name, chat_id))
+  #   self.logger.info("retrieving dialogs ...")
+  #   self.RunCoroutine(GetAllDialogsInternal(self.client))
 
   async def StartSessionAsync(self):
     """ start a telegram session, you must call this before using any other functions """

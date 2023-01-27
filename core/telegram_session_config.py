@@ -6,7 +6,8 @@ class TelegramSessionConfig(IJsonSerializable):
   def __init__(self) -> None:
     self.api_hash = None
     self.api_id = None
-    self.work_dir = None
+    self.workdir = None
+    self.phone_number = None
 
   def FromJson(self, j):
     AutoObjectFromJsonHander(self, j)
