@@ -26,4 +26,4 @@ single_chat_message_initiate_dict = {
   }
 }
 
-single_chat_message_table_structrue = SQLDatabase.CreateFromDict(single_chat_message_initiate_dict)
+single_chat_message_table_structure = SQLDatabase.CreateFromDict(single_chat_message_initiate_dict)

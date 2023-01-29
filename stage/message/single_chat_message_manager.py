@@ -1,5 +1,5 @@
 
-from sql.message.single_chat_message_sql import single_chat_message_table_structrue
+from sql.message.single_chat_message_sql import single_chat_message_table_structure
 from SQLiteWrapper import *
 import pyrogram
 import asyncio
@@ -12,12 +12,20 @@ ChatMessageSource = [
 
 class SingleChatMessageManager:
   """ just do message management """
-  def __init__(self, db_path=None) -> None:
+  def __init__(self, chat_id=None, db_path=None) -> None:
+    self._chat_id = chat_id
     self._db_path = db_path
     self._db_access_lock = asyncio.Lock()
 
     self._conn = None
     self._op = None
+
+    # cache
+    self._message_id_set = set()
+    self._file_unique_id_set = set()
+
+  def GetChatID(self):
+    return self._chat_id
 
   """ initiate interfaces """
   def SetDBPath(self, db_path):
@@ -26,31 +34,57 @@ class SingleChatMessageManager:
   async def InitiateDB(self):
     if self._db_path is None:
       raise ValueError("db path is none for SingleChatMessageManager")
-    with self._db_access_lock:
+    async with self._db_access_lock:
       self._conn = SQLite3Connector(
         self._db_path,
-        single_chat_message_table_structrue
+        single_chat_message_table_structure
       )
       self._conn.Connect(do_check=False)
       self._conn.TableValidation()
       self._op = SQLite3Operator(self._conn)
 
+  async def InitiateMessageIDSet(self):
+    async with self._db_access_lock:
+      select_result = self._op.SelectFieldFromTable(["id"], "Messages")
+      self._message_id_set = set(map(lambda x: x["id"], select_result))
+
+  async def InitiateFileUniqueIDSet(self):
+    async with self._db_access_lock:
+      select_result = self._op.SelectFieldFromTable(["file_unique_id"], "Messages")
+      self._file_unique_id_set = set(map(lambda x: x["file_unique_id"], select_result))
+
   """ insert interfaces """
-  async def InsertMessage(self, message: pyrogram.types.Message, message_source: "ChatMessageSource"):
+  async def InsertMessage(self, 
+                          message: pyrogram.types.Message, 
+                          message_source: "ChatMessageSource",
+                          force_update=False):
     # translate message to insert dict
     # pyrogram.enums.message_media_type.MessageMediaType
     # pyrogram.types.messages_and_media
-    insert_dict = self.PyrogramMessageToInsertDict(message, message_source)
-    self._op.InsertDictToTable(insert_dict, "Messages", "OR IGNORE")
+    insert_dict = self._PyrogramMessageToInsertDict(message, message_source)
+    async with self._db_access_lock:
+      if force_update:
+        self._op.InsertDictToTable(insert_dict, "Messages", "OR REPLACE")
+      else:
+        self._op.InsertDictToTable(insert_dict, "Messages", "OR IGNORE")
+      self._message_id_set.add(insert_dict["id"])
+      fui = insert_dict.get("file_unique_id", None)
+      if fui is not None:
+        self._file_unique_id_set.add(fui)
 
   async def Commit(self):
-    self._op.Commit()
+    async with self._db_access_lock:
+      self._op.Commit()
 
   """ query interfaces """
+  def IsFileUniqueIDExists(self, file_unique_id):
+    return file_unique_id in self._file_unique_id_set
 
+  def GetLastMessageID(self):
+    return max(self._file_unique_id_set)
 
   """ private functions """
-  def PyrogramMessageToInsertDict(self, message: pyrogram.types.Message, message_source: "ChatMessageSource"):
+  def _PyrogramMessageToInsertDict(self, message: pyrogram.types.Message, message_source: "ChatMessageSource"):
     insert_dict = {
       "id": message.id,
       "message_source": message_source,
@@ -70,8 +104,7 @@ class SingleChatMessageManager:
       if hasattr(media_content, "file_id"):
         insert_dict["file_id"] = media_content.file_id
       if hasattr(media_content, "file_unique_id"):
-        insert_dict["file_id"] = media_content.file_unique_id
-      # TODO: more fields
+        insert_dict["file_unique_id"] = media_content.file_unique_id
     if message.service is not None:
       insert_dict["service"] = message.service.name
     if message.author_signature is not None:
