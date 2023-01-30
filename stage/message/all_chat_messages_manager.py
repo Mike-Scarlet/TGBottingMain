@@ -51,13 +51,12 @@ class AllChatMessageManager:
       # need to get max message id from chat manager
       next_chat_retrieve_begin_message_id = chat_manager.GetLastMessageID() + 1
     await self.AddChatManager(chat_id)
-    # TODO:
+    await self.ChatAllHistoryHandler(chat_manager, next_chat_retrieve_begin_message_id)
 
-
-  async def ChatAllHistoryHandler(self, chat_manager, from_message_id):
+  async def ChatAllHistoryHandler(self, chat_manager: SingleChatMessageManager, from_message_id: int):
     pass
 
-  async def ManualMessageDispatch(self, manual_message):
+  async def ManualMessageDispatch(self, manual_message: pyrogram.types.Message):
     pass
 
   async def CallbackMessageHandler(self):
