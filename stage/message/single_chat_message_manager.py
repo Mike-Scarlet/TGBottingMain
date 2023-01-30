@@ -3,6 +3,7 @@ from sql.message.single_chat_message_sql import single_chat_message_table_struct
 from SQLiteWrapper import *
 import pyrogram
 import asyncio
+import time
 
 ChatMessageSource = [
   kChatMessageSourceFromHistory,
@@ -23,6 +24,10 @@ class SingleChatMessageManager:
     # cache
     self._message_id_set = set()
     self._file_unique_id_set = set()
+
+    # commit info
+    self._last_commit_timestamp = 0
+    self._commit_interval_seconds = 10.0
 
   def GetChatID(self):
     return self._chat_id
@@ -71,17 +76,28 @@ class SingleChatMessageManager:
       fui = insert_dict.get("file_unique_id", None)
       if fui is not None:
         self._file_unique_id_set.add(fui)
+      if abs(self._last_commit_timestamp - time.time()) > self._commit_interval_seconds:
+        await self.Commit(lock=False)
+    return insert_dict
 
-  async def Commit(self):
-    async with self._db_access_lock:
+  async def Commit(self, lock=True):
+    if lock:
+      async with self._db_access_lock:
+        self._op.Commit()
+        self._last_commit_timestamp = time.time()
+    else:
       self._op.Commit()
+      self._last_commit_timestamp = time.time()
+      
 
   """ query interfaces """
   def IsFileUniqueIDExists(self, file_unique_id):
     return file_unique_id in self._file_unique_id_set
 
   def GetLastMessageID(self):
-    return max(self._file_unique_id_set)
+    if len(self._message_id_set) == 0:
+      return -1
+    return max(self._message_id_set)
 
   """ private functions """
   def _PyrogramMessageToInsertDict(self, message: pyrogram.types.Message, message_source: "ChatMessageSource"):
