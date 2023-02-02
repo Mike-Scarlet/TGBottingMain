@@ -1,4 +1,5 @@
 
+from core.telegram_session import TelegramSession
 from message.all_chat_messages_manager import AllChatMessageManager, kHistoryRetrieveFromLastMessage
 from sql.mirror.mirror_coordinator_sql import *
 import os
@@ -14,9 +15,48 @@ class SingleMirrorDistributeHandler:
     self._all_chat_message_manager = all_chat_message_manager
 
     self._replicate_insert_message_queue = asyncio.Queue(10)
+    self._task = None
 
-  async def AddDistributeSourceMessage(self, message):
-    pass
+  async def AddDistributeSourceMessage(self, message_dict: dict):
+    await self._replicate_insert_message_queue.put(message_dict)
+
+  async def StopForwardHandling(self):
+    await self.AddDistributeSourceMessage(None)
+
+  async def StartTask(self, telegram_session: TelegramSession):
+    self._task = telegram_session.loop.create_task(self._MainTaskLoop)
+
+  async def _MainTaskLoop(self):
+    while True:
+      # TODO: INSTANT
+      first_get_result = await self._replicate_insert_message_queue.get()
+
+      fail_counter = 0
+      need_to_insert_messages = [first_get_result]
+      while True:
+        try:
+          another_get_result = self.replicate_queue.get_nowait()
+          need_to_insert_messages.append(another_get_result)
+          fail_counter = 0
+        except asyncio.QueueEmpty:
+          # queue empty
+          if fail_counter <= 0:
+            fail_counter += 1
+            await asyncio.sleep(1)  # sleep for 1 second, then retry
+            continue
+          else:
+            # stop
+            break
+        if len(need_to_insert_messages) >= self.replicate_media_batch:
+          max_message_id = await self.InsertMessages(need_to_insert_messages)
+          if max_message_id + 1 >= self.mirror_work_status.next_message_id:
+            await self.RecordRetrieveStatus(max_message_id)
+          need_to_insert_messages = []
+      if len(need_to_insert_messages) > 0:
+        # insert final
+        max_message_id = await self.InsertMessages(need_to_insert_messages)
+        if max_message_id + 1 >= self.mirror_work_status.next_message_id:
+          await self.RecordRetrieveStatus(max_message_id)
 
 class MirrorCoordinator:
   def __init__(self, 
