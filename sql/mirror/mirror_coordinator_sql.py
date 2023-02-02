@@ -17,6 +17,7 @@ mirror_coordinator_initiate_dict = {
       "need_to_send_messages": "TEXT NOT NULL",
       "disable_notification": "INTEGER NOT NULL",
       "protect_content": "INTEGER NOT NULL",
+      "current_status:": "INTEGER"
     }
   }
 }
