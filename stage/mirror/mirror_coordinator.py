@@ -1,6 +1,6 @@
 
 from core.telegram_session import TelegramSession
-from message.all_chat_messages_manager import AllChatMessageManager, kHistoryRetrieveFromLastMessage
+from message.all_chat_messages_manager import AllChatMessageManager, kHistoryRetrieveFromLastMessage, MessageCallbackPack
 from sql.mirror.mirror_coordinator_sql import *
 import os
 import asyncio
@@ -13,12 +13,13 @@ class SingleMirrorDistributeHandler:
     self._mirror_from_chat = mirror_from_chat
     self._mirror_to_chat = mirror_to_chat
     self._all_chat_message_manager = all_chat_message_manager
+    self._replicate_media_batch = 90
 
     self._replicate_insert_message_queue = asyncio.Queue(10)
     self._task = None
 
-  async def AddDistributeSourceMessage(self, message_dict: dict):
-    await self._replicate_insert_message_queue.put(message_dict)
+  async def AddDistributeSourceMessage(self, message_pack: MessageCallbackPack):
+    await self._replicate_insert_message_queue.put(message_pack)
 
   async def StopForwardHandling(self):
     await self.AddDistributeSourceMessage(None)
@@ -27,16 +28,23 @@ class SingleMirrorDistributeHandler:
     self._task = telegram_session.loop.create_task(self._MainTaskLoop)
 
   async def _MainTaskLoop(self):
+    need_to_insert_message_packs = []
     while True:
       # TODO: INSTANT
       first_get_result = await self._replicate_insert_message_queue.get()
+      if first_get_result is None:
+        return  # stop the loop
 
       fail_counter = 0
-      need_to_insert_messages = [first_get_result]
+      need_to_insert_message_packs.append(first_get_result)
+      exit_loop = False
       while True:
         try:
-          another_get_result = self.replicate_queue.get_nowait()
-          need_to_insert_messages.append(another_get_result)
+          another_get_result = self._replicate_insert_message_queue.get_nowait()
+          if another_get_result is None:
+            exit_loop = True
+            break   # direct stop
+          need_to_insert_message_packs.append(another_get_result)
           fail_counter = 0
         except asyncio.QueueEmpty:
           # queue empty
@@ -47,7 +55,9 @@ class SingleMirrorDistributeHandler:
           else:
             # stop
             break
-        if len(need_to_insert_messages) >= self.replicate_media_batch:
+        if len(need_to_insert_messages) >= self._replicate_media_batch:
+          # check if we need to do insert
+          # TODO:
           max_message_id = await self.InsertMessages(need_to_insert_messages)
           if max_message_id + 1 >= self.mirror_work_status.next_message_id:
             await self.RecordRetrieveStatus(max_message_id)
