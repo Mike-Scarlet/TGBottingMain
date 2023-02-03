@@ -3,9 +3,11 @@ from core.telegram_session import TelegramSession
 from message.all_chat_messages_manager import AllChatMessageManager, kHistoryRetrieveFromLastMessage, MessageCallbackPack
 from sql.mirror.mirror_coordinator_sql import *
 from stage.global_functions import *
+import logging
 import os
 import typing
 import asyncio
+import collections
 
 class SingleMirrorDistributeHandler:
   def __init__(self, 
@@ -16,6 +18,7 @@ class SingleMirrorDistributeHandler:
     self._mirror_to_chat = mirror_to_chat
     self._all_chat_message_manager = all_chat_message_manager
     self._replicate_media_batch = 90
+    self._logger = logging.getLogger("SingleMirrorDistributeHandler")
 
     self._replicate_insert_message_queue = asyncio.Queue(10)
     self._task = None
@@ -25,6 +28,9 @@ class SingleMirrorDistributeHandler:
 
   async def StopForwardHandling(self):
     await self.AddDistributeSourceMessage(None)
+    self._logger.info("prepare to stop: {} -> {}".format(self._mirror_from_chat, self._mirror_to_chat))
+    await self._task
+    self._logger.info("stopped: {} -> {}".format(self._mirror_from_chat, self._mirror_to_chat))
 
   async def StartTask(self, telegram_session: TelegramSession):
     self._task = telegram_session.loop.create_task(self._MainTaskLoop)
@@ -74,6 +80,8 @@ class SingleMirrorDistributeHandler:
         # insert final
         await self.ForwardMessageByPacks(need_to_insert_message_packs)
         need_to_insert_message_packs = []
+      if exit_loop:
+        return
 
   async def ForwardMessageByPacks(self, packs: typing.List[MessageForwardPack]):
     forward_pack = MessageForwardPack()
@@ -85,8 +93,10 @@ class SingleMirrorDistributeHandler:
 
 class MirrorCoordinator:
   def __init__(self, 
+               telegram_session: TelegramSession,
                mirror_coordinator_work_folder: str,
                all_chat_message_manager: AllChatMessageManager) -> None:
+    self._telegram_session = telegram_session
     self._mirror_coordinator_work_folder = mirror_coordinator_work_folder
     self._all_chat_message_manager = all_chat_message_manager
 
@@ -96,7 +106,7 @@ class MirrorCoordinator:
     self._op = None
 
     self._handler_access_lock = asyncio.Lock()
-    self._mirror_from_chat_to_handlers_dict = {}
+    self._mirror_from_chat_to_handlers_dict = collections.defaultdict(list)
 
   async def Initiate(self):
     if self._mirror_coordinator_work_folder is None:
@@ -128,4 +138,6 @@ class MirrorCoordinator:
       await self._all_chat_message_manager.GeneralHistoryRetrieve(task_dict["from_chat_id"], kHistoryRetrieveFromLastMessage)
 
   async def _AddMirrorDistribute(self, from_chat_id, to_chat_id):
-    pass
+    handler = SingleMirrorDistributeHandler(from_chat_id, to_chat_id, self._all_chat_message_manager)
+    with self._handler_access_lock:
+      self._mirror_from_chat_to_handlers_dict[from_chat_id].append(handler)
