@@ -2,7 +2,9 @@
 from core.telegram_session import TelegramSession
 from message.all_chat_messages_manager import AllChatMessageManager, kHistoryRetrieveFromLastMessage, MessageCallbackPack
 from sql.mirror.mirror_coordinator_sql import *
+from stage.global_functions import *
 import os
+import typing
 import asyncio
 
 class SingleMirrorDistributeHandler:
@@ -28,7 +30,7 @@ class SingleMirrorDistributeHandler:
     self._task = telegram_session.loop.create_task(self._MainTaskLoop)
 
   async def _MainTaskLoop(self):
-    need_to_insert_message_packs = []
+    need_to_insert_message_packs: typing.List[MessageCallbackPack] = []
     while True:
       # TODO: INSTANT
       first_get_result = await self._replicate_insert_message_queue.get()
@@ -44,7 +46,6 @@ class SingleMirrorDistributeHandler:
           if another_get_result is None:
             exit_loop = True
             break   # direct stop
-          need_to_insert_message_packs.append(another_get_result)
           fail_counter = 0
         except asyncio.QueueEmpty:
           # queue empty
@@ -55,18 +56,32 @@ class SingleMirrorDistributeHandler:
           else:
             # stop
             break
-        if len(need_to_insert_messages) >= self._replicate_media_batch:
-          # check if we need to do insert
-          # TODO:
-          max_message_id = await self.InsertMessages(need_to_insert_messages)
-          if max_message_id + 1 >= self.mirror_work_status.next_message_id:
-            await self.RecordRetrieveStatus(max_message_id)
-          need_to_insert_messages = []
-      if len(need_to_insert_messages) > 0:
+        do_forward_first = False
+        if len(need_to_insert_message_packs) >= self._replicate_media_batch:
+          # check if new pack has same media batch id with exist
+          if need_to_insert_message_packs[-1].message_dict["media_group_id"] is None or \
+                need_to_insert_message_packs[-1].message_dict["media_group_id"] != \
+                another_get_result.message_dict["media_group_id"]:
+            do_forward_first = True
+
+        if do_forward_first:
+          # construct forward pack
+          await self.ForwardMessageByPacks(need_to_insert_message_packs)
+          need_to_insert_message_packs = []
+        # simple add
+        need_to_insert_message_packs.append(another_get_result)
+      if len(need_to_insert_message_packs) > 0:
         # insert final
-        max_message_id = await self.InsertMessages(need_to_insert_messages)
-        if max_message_id + 1 >= self.mirror_work_status.next_message_id:
-          await self.RecordRetrieveStatus(max_message_id)
+        await self.ForwardMessageByPacks(need_to_insert_message_packs)
+        need_to_insert_message_packs = []
+
+  async def ForwardMessageByPacks(self, packs: typing.List[MessageForwardPack]):
+    forward_pack = MessageForwardPack()
+    forward_pack.from_chat_id = self._mirror_from_chat
+    forward_pack.to_chat_id = self._mirror_to_chat
+    forward_pack.from_chat_id_messages = list(map(lambda x: x["id"], packs))
+    await GlobalForwardMessage(forward_pack)   # TODO: fail process
+
 
 class MirrorCoordinator:
   def __init__(self, 
