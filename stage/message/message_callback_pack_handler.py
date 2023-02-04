@@ -34,7 +34,10 @@ class MessageCallbackPackHandler:
       raise ValueError("self._message_callback_pack_queue is None")
     while True:
       pack = await self._message_callback_pack_queue.get()
+      print("processing pack:", pack.message_dict)
       for function in self._pack_handler_functions:
         function(pack)
       for function in self._pack_handler_async_functions:
+        print("async process")
         await function(pack)
+        print("async done")

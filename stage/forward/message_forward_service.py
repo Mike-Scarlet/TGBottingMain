@@ -24,6 +24,7 @@ class MessageForwardService:
     async with self._send_lock:
       while True:
         try:
+          # TODO: add to single chat manager
           await self._telegram_session.client.forward_messages(pack.to_chat_id, pack.from_chat_id, pack.from_chat_id_messages, 
                                                               disable_notification=pack.disable_notification, 
                                                               protect_content=pack.protect_content)

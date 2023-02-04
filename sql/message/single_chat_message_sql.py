@@ -7,6 +7,7 @@ single_chat_message_initiate_dict = {
       # > MAIN FIELDS
       "id": "INTEGER UNIQUE NOT NULL",
       "chat_id": "TEXT",
+      "from_user": "INTEGER",
       "date": "INTEGER",  # timestamp from utc
       "edit_date": "INTEGER",  # timestamp from utc
       "media": "TEXT",   # pyrogram.enums.MessageMediaType
@@ -21,6 +22,8 @@ single_chat_message_initiate_dict = {
       "file_id": "TEXT",
       "file_unique_id": "TEXT",  # use this to map to file key
       "message_source": "INTEGER",  # usage
+      # > USER FIELDS
+      "__is_removed": "INTEGER DEFAULT 0",
     },
     "primary_keys": "id"
   }

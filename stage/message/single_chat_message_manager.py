@@ -4,6 +4,7 @@ from SQLiteWrapper import *
 import pyrogram
 import asyncio
 import time
+import typing
 
 ChatMessageSource = [
   kChatMessageSourceFromHistory,
@@ -50,12 +51,12 @@ class SingleChatMessageManager:
 
   async def InitiateMessageIDSet(self):
     async with self._db_access_lock:
-      select_result = self._op.SelectFieldFromTable(["id"], "Messages")
+      select_result = self._op.SelectFieldFromTable(["id"], "Messages", "__is_removed == 0")
       self._message_id_set = set(map(lambda x: x["id"], select_result))
 
   async def InitiateFileUniqueIDSet(self):
     async with self._db_access_lock:
-      select_result = self._op.SelectFieldFromTable(["file_unique_id"], "Messages")
+      select_result = self._op.SelectFieldFromTable(["file_unique_id"], "Messages", "__is_removed == 0")
       self._file_unique_id_set = set(map(lambda x: x["file_unique_id"], select_result))
 
   """ insert interfaces """
@@ -87,8 +88,14 @@ class SingleChatMessageManager:
         self._last_commit_timestamp = time.time()
     else:
       self._op.Commit()
-      self._last_commit_timestamp = time.time()
-      
+      self._last_commit_timestamp = time.time()      
+
+  async def RemoveMessages(self, messages: typing.List[int]):
+    async with self._db_access_lock:
+      self._op.UpdateFieldFromTable(
+        {"__is_removed": 1}, "Messages", 
+        "id in ({})".format(",".join(map(str, messages))))
+      await self.Commit(lock=False)
 
   """ query interfaces """
   def IsFileUniqueIDExists(self, file_unique_id):
@@ -99,6 +106,18 @@ class SingleChatMessageManager:
       return -1
     return max(self._message_id_set)
 
+  async def GetDuplicateMediaMessageIDs(self):
+    duplicate_ids = []
+    async with self._db_access_lock:
+      select_result = self._op.SelectFieldFromTable(["id", "file_unique_id"], "Messages", "__is_removed == 0 and file_unique_id is not NULL")
+      use_set = set()
+      for msg_dict in select_result:
+        if msg_dict["file_unique_id"] in use_set:
+          duplicate_ids.append(msg_dict["id"])
+        else:
+          use_set.add(msg_dict["file_unique_id"])
+    return duplicate_ids
+
   """ private functions """
   def _PyrogramMessageToInsertDict(self, message: pyrogram.types.Message, message_source: "ChatMessageSource"):
     insert_dict = {
@@ -107,6 +126,8 @@ class SingleChatMessageManager:
     }
     if message.chat is not None:
       insert_dict["chat_id"] = message.chat.id
+    if message.from_user is not None:
+      insert_dict["from_user"] = message.from_user.id
     if message.date is not None:
       insert_dict["date"] = message.date.timestamp()
     if message.edit_date is not None:
