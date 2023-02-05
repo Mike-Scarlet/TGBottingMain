@@ -38,6 +38,7 @@ async def main():
 
   message_forward_service = MessageForwardService(telegram_sess)
   SetGlobalMessageForwardService(message_forward_service)
+  message_forward_service.SetForwardedCallbackAsyncFunction(all_chat_message_manager.AddManualMessages)
 
   async def DummyAsyncFunction(message_pack: MessageCallbackPack):
     print(message_pack.message_dict)

@@ -8,11 +8,12 @@ import os
 import typing
 import asyncio
 import collections
+import pyrogram.errors
 
 class SingleMirrorDistributeHandler:
   def __init__(self, 
-               mirror_from_chat: str, 
-               mirror_to_chat: str, 
+               mirror_from_chat: typing.Union[int, str], 
+               mirror_to_chat: typing.Union[int, str], 
                all_chat_message_manager: AllChatMessageManager) -> None:
     self._mirror_from_chat = mirror_from_chat
     self._mirror_to_chat = mirror_to_chat
@@ -37,13 +38,18 @@ class SingleMirrorDistributeHandler:
 
   async def StartTask(self, telegram_session: TelegramSession):
     self._task = telegram_session.loop.create_task(self._MainTaskLoop())
+    # print("task started")
 
   async def _MainTaskLoop(self):
+    self._logger.info("start mirror distribute task: {} -> {}".format(
+      self._mirror_from_chat, self._mirror_to_chat))
     need_to_insert_message_packs: typing.List[MessageCallbackPack] = []
     while True:
       # TODO: INSTANT
       first_get_result = await self._replicate_insert_message_queue.get()
       if first_get_result is None:
+        self._logger.info("stopped mirror distribute task: {} -> {}".format(
+            self._mirror_from_chat, self._mirror_to_chat))
         return  # stop the loop
 
       fail_counter = 0
@@ -68,9 +74,9 @@ class SingleMirrorDistributeHandler:
         do_forward_first = False
         if len(need_to_insert_message_packs) >= self._replicate_media_batch:
           # check if new pack has same media batch id with exist
-          if need_to_insert_message_packs[-1].message_dict["media_group_id"] is None or \
-                need_to_insert_message_packs[-1].message_dict["media_group_id"] != \
-                another_get_result.message_dict["media_group_id"]:
+          if need_to_insert_message_packs[-1].message_dict.get("media_group_id", None) is None or \
+                need_to_insert_message_packs[-1].message_dict.get("media_group_id", None) != \
+                another_get_result.message_dict.get("media_group_id", None):
             do_forward_first = True
 
         if do_forward_first:
@@ -84,13 +90,15 @@ class SingleMirrorDistributeHandler:
         await self.ForwardMessageByPacks(need_to_insert_message_packs)
         need_to_insert_message_packs = []
       if exit_loop:
+        self._logger.info("stopped mirror distribute task: {} -> {}".format(
+            self._mirror_from_chat, self._mirror_to_chat))
         return
 
   async def ForwardMessageByPacks(self, packs: typing.List[MessageForwardPack]):
     forward_pack = MessageForwardPack()
     forward_pack.from_chat_id = self._mirror_from_chat
     forward_pack.to_chat_id = self._mirror_to_chat
-    forward_pack.from_chat_id_messages = list(map(lambda x: x["id"], packs))
+    forward_pack.from_chat_id_messages = list(map(lambda x: x.message_dict["id"], packs))
     await GlobalForwardMessage(forward_pack)   # TODO: fail process
 
 
@@ -135,7 +143,7 @@ class MirrorCoordinator:
     await self._HandleExistTasks()
 
   async def HandleCallbackPack(self, pack: MessageCallbackPack):
-    print("in: ", pack.message_dict)
+    # print("in: ", pack.message_dict)
     if pack.message_dict.get("media", None) in (None, "STICKER", "ANIMATION", "VOICE"):
       return  # do not forward
     if pack.message_dict.get("file_unique_id", None) is None:
@@ -162,12 +170,23 @@ class MirrorCoordinator:
     }
     async with self._db_access_lock:
       self._op.InsertDictToTable(db_insert_dict, "MirrorTasks", "OR REPLACE")
+      self._op.Commit()
 
     await self._AddMirrorDistribute(from_chat_id, to_chat_id)
+    await self._all_chat_message_manager.GeneralHistoryRetrieve(to_chat_id, kHistoryRetrieveFromLastMessage)
     await self._all_chat_message_manager.GeneralHistoryRetrieve(from_chat_id, kHistoryRetrieveFromLastMessage)
 
   async def _HandleExistTasks(self):
-    select_results = self._op.SelectFieldFromTable("*", "MirrorTasks")
+    select_results = self._op.SelectFieldFromTable("*", "MirrorTasks", "is_active == 1")
+    for task_dict in select_results:
+      try:
+        task_dict["from_chat_id"] = int(task_dict["from_chat_id"])
+      except:
+        pass
+      try:
+        task_dict["to_chat_id"] = int(task_dict["to_chat_id"])
+      except:
+        pass
     for task_dict in select_results:
       if task_dict["is_active"] == 0:
         continue
@@ -182,7 +201,16 @@ class MirrorCoordinator:
       await self._all_chat_message_manager.GeneralHistoryRetrieve(task_dict["from_chat_id"], kHistoryRetrieveFromLastMessage)
 
   async def _AddMirrorDistribute(self, from_chat_id, to_chat_id):
+    get_result = self._mirror_from_chat_to_handlers_dict.get(from_chat_id, None)
+    if get_result is not None:
+      # check if in get result list
+      for single_result in get_result:
+        if to_chat_id == single_result.GetMirrorToChat():
+          self._logger.info("already exist mirror distribute handler: {} -> {}".format(from_chat_id, to_chat_id))
+          return False
+
     handler = SingleMirrorDistributeHandler(from_chat_id, to_chat_id, self._all_chat_message_manager)
     async with self._handler_access_lock:
       self._mirror_from_chat_to_handlers_dict[from_chat_id].append(handler)
       await handler.StartTask(self._telegram_session)
+    return True
