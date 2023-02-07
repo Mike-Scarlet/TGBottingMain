@@ -13,8 +13,7 @@ class AsyncTimedTrigger:
     self._trigger_loop_cond_var = asyncio.Condition()
     self._trigger_async_function = None
 
-    self._trigger_called_lock = asyncio.Lock()
-    self._trigger_called = True
+    self._callback_last_time = time.time()
     self._task = None
 
   def SetCallbackAsyncFunction(self, coro):
@@ -24,8 +23,6 @@ class AsyncTimedTrigger:
     activate_time = seconds_to_activate + time.time()
     self._trigger_activate_time = activate_time
     async with self._trigger_loop_cond_var:
-      async with self._trigger_called_lock:
-        self._trigger_called = False
       self._trigger_loop_cond_var.notify()
 
   async def StartTriggerHandlerTask(self, loop: asyncio.AbstractEventLoop):
@@ -66,13 +63,11 @@ class AsyncTimedTrigger:
         current_time = time.time()
       
       # done, do call back function
-      if self._trigger_async_function and not self._trigger_called:
+      if self._trigger_async_function:
         try:
           await self._trigger_async_function()
         except:
           pass
-        async with self._trigger_called_lock:
-          self._trigger_called = True
     self._logger.info("trigger task loop exited")
 
 

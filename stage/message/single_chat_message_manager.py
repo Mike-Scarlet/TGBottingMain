@@ -1,5 +1,6 @@
 
 from sql.message.single_chat_message_sql import single_chat_message_table_structure
+from utils.async_timed_trigger import AsyncTimedTrigger
 from SQLiteWrapper import *
 import pyrogram
 import asyncio
@@ -29,6 +30,8 @@ class SingleChatMessageManager:
     # commit info
     self._last_commit_timestamp = 0
     self._commit_interval_seconds = 10.0
+
+    
 
   def GetChatID(self):
     return self._chat_id
