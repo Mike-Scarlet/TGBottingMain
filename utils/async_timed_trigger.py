@@ -14,10 +14,14 @@ class AsyncTimedTrigger:
     self._trigger_async_function = None
 
     self._callback_last_time = time.time()
+    self._must_call_callback_time_interval = -1
     self._task = None
 
   def SetCallbackAsyncFunction(self, coro):
     self._trigger_async_function = coro
+
+  def SetMustCallCallbackTimeInterval(self, interval):
+    self._must_call_callback_time_interval = interval
 
   async def ActivateTimedTrigger(self, seconds_to_activate):
     activate_time = seconds_to_activate + time.time()
@@ -59,7 +63,13 @@ class AsyncTimedTrigger:
       current_time = time.time()
       while current_time < self._trigger_activate_time:
         # print("sleep: {}".format(self._trigger_activate_time - current_time + self._trigger_pad_time))
-        await asyncio.sleep(self._trigger_activate_time - current_time + self._trigger_pad_time)
+        sleep_time = self._trigger_activate_time - current_time + self._trigger_pad_time
+        if self._must_call_callback_time_interval > 0:
+          time_since_last_callback = current_time - self._callback_last_time
+          if time_since_last_callback > self._must_call_callback_time_interval:
+            break  # force do callback
+          sleep_time = min(sleep_time, self._must_call_callback_time_interval - time_since_last_callback + self._trigger_pad_time)
+        await asyncio.sleep(sleep_time)
         current_time = time.time()
       
       # done, do call back function
@@ -68,6 +78,7 @@ class AsyncTimedTrigger:
           await self._trigger_async_function()
         except:
           pass
+        self._callback_last_time = time.time()
     self._logger.info("trigger task loop exited")
 
 
@@ -83,6 +94,13 @@ if __name__ == "__main__":
     #   print("current time: {}".format(time.time()))
     #   await trig.ActivateTimedTrigger(0.5)
     #   await asyncio.sleep(2)
+    trig.SetMustCallCallbackTimeInterval(5.0)
+    for i in range(20):
+      print("current time: {}".format(time.time()))
+      await trig.ActivateTimedTrigger(2.0)
+      await asyncio.sleep(0.5)
+    await asyncio.sleep(3.0)
+
     for i in range(3):
       print("current time: {}".format(time.time()))
       await trig.ActivateTimedTrigger(2.0)

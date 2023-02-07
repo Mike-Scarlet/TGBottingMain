@@ -112,6 +112,7 @@ class AllChatMessageManager:
         chat_id,
         os.path.join(self._all_chat_db_store_folder, "{}.db".format(chat_id)))
       await get_result.InitiateDB()
+      await get_result.InitiateCommitTask(self._telegram_session.loop)
       await get_result.InitiateMessageIDSet()
       await get_result.InitiateFileUniqueIDSet()
     return get_result

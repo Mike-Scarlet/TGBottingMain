@@ -27,11 +27,9 @@ class SingleChatMessageManager:
     self._message_id_set = set()
     self._file_unique_id_set = set()
 
-    # commit info
-    self._last_commit_timestamp = 0
-    self._commit_interval_seconds = 10.0
-
-    
+    # commit trigger
+    self._timed_trigger = AsyncTimedTrigger()
+    self._timed_trigger.SetMustCallCallbackTimeInterval(20.0)
 
   def GetChatID(self):
     return self._chat_id
@@ -51,6 +49,10 @@ class SingleChatMessageManager:
       self._conn.Connect(do_check=False)
       self._conn.TableValidation()
       self._op = SQLite3Operator(self._conn)
+
+  async def InitiateCommitTask(self, loop):
+    self._timed_trigger.SetCallbackAsyncFunction(self.Commit)
+    await self._timed_trigger.StartTriggerHandlerTask(loop)
 
   async def InitiateMessageIDSet(self):
     async with self._db_access_lock:
@@ -80,18 +82,15 @@ class SingleChatMessageManager:
       fui = insert_dict.get("file_unique_id", None)
       if fui is not None:
         self._file_unique_id_set.add(fui)
-      if abs(self._last_commit_timestamp - time.time()) > self._commit_interval_seconds:
-        await self.Commit(lock=False)
+      await self._timed_trigger.ActivateTimedTrigger(2.0)
     return insert_dict
 
   async def Commit(self, lock=True):
     if lock:
       async with self._db_access_lock:
         self._op.Commit()
-        self._last_commit_timestamp = time.time()
     else:
       self._op.Commit()
-      self._last_commit_timestamp = time.time()      
 
   async def RemoveMessages(self, messages: typing.List[int]):
     async with self._db_access_lock:
