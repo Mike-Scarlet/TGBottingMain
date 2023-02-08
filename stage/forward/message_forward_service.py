@@ -18,8 +18,8 @@ class MessageForwardService:
     self._send_lock = asyncio.Lock()
     self._logger = logging.getLogger("MessageForwardService")
 
-    self._message_forwarded_callback_async = None
-    self._message_forward_failure_callback_async = None  # TODO: do this
+    self._message_forwarded_callback_async = None  # param is list of messages
+    self._message_forward_failure_callback_async = None  # param is message forward pack
 
   def SetForwardedCallbackAsyncFunction(self, async_fn):
     self._message_forwarded_callback_async = async_fn
@@ -33,7 +33,6 @@ class MessageForwardService:
     async with self._send_lock:
       while True:
         try:
-          # TODO: add to single chat manager
           forward_result = await self._telegram_session.client.forward_messages(
               pack.to_chat_id, pack.from_chat_id, pack.from_chat_id_messages, 
               disable_notification=pack.disable_notification, 
@@ -55,6 +54,8 @@ class MessageForwardService:
           await asyncio.sleep(e.value + 2.0)
           continue
         except Exception as e:
+          if self._message_forward_failure_callback_async is not None:
+            await self._message_forward_failure_callback_async(pack)
           print(e)
           print("will not forward anymore")
           break
