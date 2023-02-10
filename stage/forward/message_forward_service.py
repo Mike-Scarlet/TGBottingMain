@@ -1,5 +1,6 @@
 
 from core.telegram_session import *
+from utils.periodic_restriction import PeriodicRestriction
 import logging
 
 class MessageForwardPack:
@@ -21,6 +22,10 @@ class MessageForwardService:
     self._message_forwarded_callback_async = None  # param is list of messages
     self._message_forward_failure_callback_async = None  # param is message forward pack
 
+    self._forward_restriction_helper = PeriodicRestriction()
+    self._forward_restriction_helper.SetPeriod(3600)  # 1 hour
+    self._forward_restriction_helper.SetRestrictCount(1500)  # 1500 messages
+
   def SetForwardedCallbackAsyncFunction(self, async_fn):
     self._message_forwarded_callback_async = async_fn
 
@@ -40,10 +45,12 @@ class MessageForwardService:
           if self._message_forwarded_callback_async is not None:
             if isinstance(forward_result, pyrogram.types.Message):
               forward_result = [forward_result]
-            await self._message_forwarded_callback_async(forward_result)          
+            await self._message_forwarded_callback_async(forward_result)
           self._logger.info("[{} -> {}] forwarded {} messages".format(pack.from_chat_id, pack.to_chat_id, len(pack.from_chat_id_messages)))
           await asyncio.sleep(max(0.5, len(pack.from_chat_id_messages) * self._wait_seconds_per_forward))
           send_result = True
+          # post add
+          await self._forward_restriction_helper.AddCountByNowAsyncPreCheck(len(forward_result))
           break
         except pyrogram.errors.flood_420.FloodWait as e:
           print(e)

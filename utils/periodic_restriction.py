@@ -1,4 +1,8 @@
 
+__all__ = [
+  "PeriodicRestriction"
+]
+
 import time
 import typing
 import asyncio
@@ -36,9 +40,12 @@ class PeriodicRestriction:
         await asyncio.sleep(sleep_time)
 
   async def AddCountByNowAsyncPreCheck(self, count):
-    while self._latch_count + count > self._count_thresh:
-      await self.WaitTillNextTimeAync()
-      self.UpdateInnerCountent()
+    if self._count_thresh >= 0:
+      while self._latch_count + count > self._count_thresh:
+        if count > self._count_thresh and self._latch_count == 0:
+          break  # stop, no wait
+        await self.WaitTillNextTimeAync()
+        self.UpdateInnerCountent()
     add_time = time.time()
     content = PeriodicContent()
     content.time = add_time
@@ -48,11 +55,15 @@ class PeriodicRestriction:
 
 async def test_main():
   restrict = PeriodicRestriction()
-  restrict.SetPeriod(5)
-  restrict.SetRestrictCount(4)
-  for i in range(10):  
-    print(time.time())
-    await restrict.AddCountByNowAsyncPreCheck(2)
+  restrict.SetPeriod(3)
+  restrict.SetRestrictCount(6)
+  for i in range(6):  
+    print(i, time.time())
+    await restrict.AddCountByNowAsyncPreCheck(10)
+    await asyncio.sleep(0.1)
+  for i in range(15):  
+    print(i, time.time())
+    await restrict.AddCountByNowAsyncPreCheck(1)
     print("added")
 
 if __name__ == "__main__":
