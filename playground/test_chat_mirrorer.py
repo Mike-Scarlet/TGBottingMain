@@ -19,12 +19,12 @@ async def main():
   store_cfg.LoadFromJsonFile("config/all_path_definition.json")
 
   telegram_sess_cfg = TelegramSessionConfig()
-  telegram_sess_cfg.LoadFromJsonFile("config/main_session_config.json")
+  telegram_sess_cfg.LoadFromJsonFile("config/forwardm_session_config.json")
 
   telegram_sess = TelegramSession(telegram_sess_cfg)
   await telegram_sess.StartSessionAsync()
 
-  # await telegram_sess.ListAllDialogsAsync()
+  await telegram_sess.ListAllDialogsAsync()
 
   all_chat_message_manager = AllChatMessageManager(telegram_sess, store_cfg.all_chat_db_store_folder)
   telegram_sess.client.add_handler(
@@ -48,8 +48,8 @@ async def main():
   callback_pack_handler.AddFunction(mirror_coordinator.HandleCallbackPack)
   await mirror_coordinator.Initiate()
 
-  mirror_src_group = -1001870436576
-  mirror_target_group = -820020834
+  mirror_src_group = -1001829504500
+  mirror_target_group = -871102399
   await mirror_coordinator.AddMirrorTask(mirror_src_group, mirror_target_group)
 
   # await all_chat_message_manager.GeneralHistoryRetrieve(-896909962)

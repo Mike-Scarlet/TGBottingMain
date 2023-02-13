@@ -5,6 +5,7 @@ from stage.message.single_chat_message_manager import *
 import os
 import logging
 import math
+import pyrogram
 import pyrogram.errors
 
 HistoryRetriveModes = [
