@@ -1,6 +1,6 @@
 
 from utils.single_db_serializable_object import *
-from http_bots.permission_management.permission_sql_definition import *
+from http_bots.general.permission_management.permission_sql_definition import *
 import threading
 
 class PermissionDatabase(SingleDBSerializableObject):
