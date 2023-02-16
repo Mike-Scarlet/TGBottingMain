@@ -2,9 +2,9 @@
 from SQLiteWrapper import *
 
 class SingleDBSerializableObject:
-  def __init__(self, path:str=None, table_structure:SQLDatabase=None) -> None:
-    self.db_path = None
-    self.db_table_structure = None
+  def __init__(self, db_path:str=None, table_structure:SQLDatabase=None) -> None:
+    self.db_path = db_path
+    self.db_table_structure = table_structure
 
     self._conn = None
     self._op = None
@@ -23,3 +23,7 @@ class SingleDBSerializableObject:
     self._conn.Connect(do_check=False)
     self._conn.TableValidation()
     self._op = SQLite3Operator(self._conn)
+
+  def Commit(self):
+    if self._op is not None:
+      self._op.Commit()
