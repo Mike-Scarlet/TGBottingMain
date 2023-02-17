@@ -36,7 +36,7 @@ from_messages_initiate_dict = {
       "from_message_id": "INTEGER",
       "media_unique_id": "TEXT"
     },
-    "primary_keys": ["from_chat_id", "from_message_id"]
+    "primary_keys": ["from_user_id", "from_message_id"]
   }
 }
 
