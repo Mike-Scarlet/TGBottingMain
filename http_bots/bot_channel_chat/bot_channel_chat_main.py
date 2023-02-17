@@ -10,14 +10,13 @@ from utils.async_single_db_auto_commit_serializable_object import *
 from http_bots.bot_channel_chat.bot_channel_chat_constants import *
 import telegram
 import telegram.ext
-import os
+import os, time
 
 class ForwardTask:
   def __init__(self) -> None:
     self.from_user_id = None
     self.from_message_id = None
     self.file_unique_id = None
-    # TODO
 
 class ChannelChatUserStatus:
   def __init__(self) -> None:
@@ -50,6 +49,36 @@ class FromMessagesManageDatabase(AsyncSingleDBAutoCommitSerializableObject):
 
   async def Initiate(self, loop: asyncio.AbstractEventLoop):
     await super().Initiate(loop)
+
+  async def AddForwardTask(self, forward_task: ForwardTask):
+    insert_dict = {
+      "from_user_id": forward_task.from_user_id,
+      "from_message_id": forward_task.from_message_id,
+      "file_unique_id": forward_task.file_unique_id,
+      "forward_status": kForwardStatusInQueue,
+      "add_time": time.time(),
+    }
+    async with self._lock:
+      self._op.InsertDictToTable(insert_dict, "FromMessages")
+      await self._timed_trigger.ActivateTimedTrigger(4.0)
+    
+  async def SetSuccessForForwardTask(self, forward_task: ForwardTask):
+    async with self._lock:
+      self._op.UpdateFieldFromTable(
+        {"forward_status": kForwardStatusDone}, 
+        "FromMessages", 
+        "from_user_id = {} and from_message_id = {}".format(
+            forward_task.from_user_id, forward_task.from_message_id))
+      await self._timed_trigger.ActivateTimedTrigger(4.0)
+
+  async def SetFailForForwardTask(self, forward_task: ForwardTask):
+    async with self._lock:
+      self._op.UpdateFieldFromTable(
+        {"forward_status": kForwardStatusInvalid}, 
+        "FromMessages", 
+        "from_user_id = {} and from_message_id = {}".format(
+            forward_task.from_user_id, forward_task.from_message_id))
+      await self._timed_trigger.ActivateTimedTrigger(4.0)
 
 class BotChannelChat:
   def __init__(self, workspace_folder) -> None:
@@ -103,22 +132,32 @@ class BotChannelChat:
   async def MediaHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE):
     if update.effective_message is None:
       return
+    # TODO: global status check
+    # TODO: update user current status
     if update.effective_message.video is not None:
       # add video
-      pass
+      forward_task = ForwardTask()
+      forward_task.from_user_id = update.effective_chat.id
+      forward_task.from_message_id = update.effective_message.message_id
+      forward_task.file_unique_id = update.effective_message.video.file_unique_id
+      # add to status store db
+      await self._from_message_db.AddForwardTask(forward_task)
+      await self._forward_process_queue.put(forward_task)
     if update.effective_message.photo is not None:
       valid_photo = update.effective_message.photo[-1]
-      pass
-    
-    if not isinstance(attachment, (telegram.Video, telegram.ChatPhoto)):
-      return
-    update.effective_message.effective_attachment
-    pass
-    update.get_bot().forward_message()
+      forward_task = ForwardTask()
+      forward_task.from_user_id = update.effective_chat.id
+      forward_task.from_message_id = update.effective_message.message_id
+      forward_task.file_unique_id = update.effective_message.valid_photo.file_unique_id
+      # add to status store db
+      await self._from_message_db.AddForwardTask(forward_task)
+      await self._forward_process_queue.put(forward_task)
 
   """ worker loop """
   async def ForwardWorkerLoop(self):
-    pass
+    while True:
+      get_result = await self._forward_process_queue.get()
+      pass
  
 def BotChannelChatMain(bot_token):
   bcc = BotChannelChat("workspace/bot_channel_chat")

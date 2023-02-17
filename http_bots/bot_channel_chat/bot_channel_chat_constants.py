@@ -14,6 +14,12 @@ ChatStatuses = [
   kChatStatusMute,
 ] = range(3)
 
+ForwardStatuses = [
+  kForwardStatusInQueue,
+  kForwardStatusDone,
+  kForwardStatusInvalid,
+] = range(3)
+
 user_status_initiate_dict = {
   "UserStatus": {
     "field_definition": {
@@ -34,7 +40,9 @@ from_messages_initiate_dict = {
     "field_definition": {
       "from_user_id": "INTEGER",
       "from_message_id": "INTEGER",
-      "media_unique_id": "TEXT"
+      "file_unique_id": "TEXT",
+      "forward_status": "INTEGER",
+      "add_time": "REAL",
     },
     "primary_keys": ["from_user_id", "from_message_id"]
   }
