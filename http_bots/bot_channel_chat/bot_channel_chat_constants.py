@@ -3,10 +3,11 @@ from SQLiteWrapper import *
 
 ChatPermissions = [
   kChatPermissionInvalidUser,
-  kChatPermissionNormalUser,
-  kChatPermissionVIPUser,
   kChatPermissionAdminUser,
-] = range(4)
+  kChatPermissionVIPUser,
+  kChatPermissionNormalUser,
+  kChatPermissionGuestUser,
+] = range(5)
 
 ChatStatuses = [
   kChatStatusInactive,
@@ -40,6 +41,7 @@ from_messages_initiate_dict = {
     "field_definition": {
       "from_user_id": "INTEGER",
       "from_message_id": "INTEGER",
+      "task_index": "INTEGER",
       "file_unique_id": "TEXT",
       "forward_status": "INTEGER",
       "add_time": "REAL",
