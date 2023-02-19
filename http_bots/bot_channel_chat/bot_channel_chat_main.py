@@ -177,7 +177,7 @@ class BotChannelChat:
     self._tg_app = None
     self._loop_task = None
     self._active_user_count = 0
-    self._command_forward_worker_count = 12
+    self._command_forward_worker_count = 24
     self._command_forward_workers = []
     self._command_forward_queue = asyncio.Queue(1)
 
@@ -238,7 +238,10 @@ class BotChannelChat:
     user = update.effective_user
     if user is None:
       return
-    await update.message.reply_text(f'Hello {user.first_name}, your user id is {user.id}, send /join to join the chat, send /current_status to check your status')
+    try:
+      await update.message.reply_text(f'Hello {user.first_name}, your user id is {user.id}, send /join to join the chat, send /current_status to check your status')
+    except:
+      pass
 
   async def JoinHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
@@ -253,7 +256,10 @@ class BotChannelChat:
     if user_st.permission in (kChatPermissionVIPUser, kChatPermissionAdminUser):
       await self.ActivateOrSetActiveTime(user_st, update)
     else:
-      await update.message.reply_text(f'send a video or photo to activate')
+      try:
+        await update.message.reply_text(f'send a video or photo to activate')
+      except:
+        pass
 
   async def CurrentStatusHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
@@ -262,7 +268,10 @@ class BotChannelChat:
     user_st = self._user_status_dict.get(user.id, None)
     if user_st is None:
       return
-    await update.message.reply_text(f'your user id: {user_st.user_id}, your active status: {user_st.status != kChatStatusInactive}')
+    try:
+      await update.message.reply_text(f'your user id: {user_st.user_id}, your active status: {user_st.status != kChatStatusInactive}')
+    except:
+      pass
 
   async def GetChatStatusHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
@@ -271,8 +280,10 @@ class BotChannelChat:
     user_st = self._user_status_dict.get(user.id, None)
     if user_st is None:
       return
-    await update.message.reply_text(f'the process queue size is {self._forward_process_queue.qsize()}, the active user count is {self._active_user_count}')
-
+    try:
+      await update.message.reply_text(f'the process queue size is {self._forward_process_queue.qsize()}, the active user count is {self._active_user_count}')
+    except:
+      pass
 
   async def MediaHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE):
     if update.effective_message is None:
@@ -348,22 +359,30 @@ class BotChannelChat:
       get_item: ForwardCommand = await self._command_forward_queue.get()
       if get_item is None:
         break
-      try:
-        await self._tg_app.bot.copy_message(
-              get_item.to_user_id,
-              get_item.task.from_user_id, 
-              get_item.task.from_message_id,
-              caption="#message {}".format(get_item.task.task_index),
-              disable_notification=True)
-      except Exception as e:
-        self._logger.info("forward message {} to {}, raised exception".format(get_item.task.task_index, get_item.to_user_id))
-        self._logger.info("{}".format(e))
-        user_st = self._user_status_dict.get(get_item.to_user_id, None)
-        if user_st is not None:
-          user_st.status = kChatStatusInactive
-          user_st.permission = kChatPermissionGuestUser
-          await self._user_status_db.UpdateUserPermission(get_item.to_user_id, user_st)
-          await self._user_status_db.UpdateUserCurrentStatus(get_item.to_user_id, user_st)
+      for try_cnt in range(5):
+        try:
+          await self._tg_app.bot.copy_message(
+                get_item.to_user_id,
+                get_item.task.from_user_id, 
+                get_item.task.from_message_id,
+                caption="#message {}".format(get_item.task.task_index),
+                disable_notification=True)
+          break
+        except telegram.error.Forbidden as e:
+          self._logger.info("forward message {} to {}, user is forbidden".format(get_item.task.task_index, get_item.to_user_id))
+          user_st = self._user_status_dict.get(get_item.to_user_id, None)
+          if user_st is not None:
+            user_st.status = kChatStatusInactive
+            user_st.permission = kChatPermissionGuestUser
+            await self._user_status_db.UpdateUserPermission(get_item.to_user_id, user_st)
+            await self._user_status_db.UpdateUserCurrentStatus(get_item.to_user_id, user_st)
+          break
+        except Exception as e:
+          self._logger.info("(retry {}) forward message {} to {}, raised exception".format(
+              try_cnt, get_item.task.task_index, get_item.to_user_id))
+          self._logger.info("{}".format(e))
+          await asyncio.sleep(5.0)  # wait 5 secs
+        
         
 
   """ private function """
@@ -386,7 +405,7 @@ class BotChannelChat:
       await self.DirectSetActiveTime(status)
 
   async def SetJoinTime(self, status: ChannelChatUserStatus):
-    status.last_active_time = time.time()
+    status.join_time = time.time()
     await self._user_status_db.UpdateUserJoinTime(status.user_id, status)
 
   async def DirectSetActiveTime(self, status: ChannelChatUserStatus):
@@ -408,7 +427,10 @@ class BotChannelChat:
     await self._user_status_db.UpdateUserCurrentStatus(status.user_id, status)
     # notify
     bot: telegram.Bot = self._tg_app.bot
-    await bot.send_message(status.user_id, "you have be inactive for a while, your active status is set to False, send a video or photo to reactivate")
+    try:
+      await bot.send_message(status.user_id, "you have be inactive for a while, your active status is set to False, send a video or photo to reactivate")
+    except Exception as e:
+      self._logger.info("send inactive message to {} failed".format(status.user_id))
 
   def GetEnsureActiveSpanByPermission(self, permission):
     span = 0
