@@ -304,6 +304,7 @@ class BotChannelChat:
         except Exception as e:
           print(e)
           pass
+        return
       else:
         await self.AddNewUser(user_id)
     except:
