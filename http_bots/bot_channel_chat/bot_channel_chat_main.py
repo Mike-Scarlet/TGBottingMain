@@ -186,6 +186,7 @@ class BotChannelChat:
     app.add_handler(telegram.ext.CommandHandler("join", self.JoinHandler))
     app.add_handler(telegram.ext.CommandHandler("current_status", self.CurrentStatusHandler))
     app.add_handler(telegram.ext.CommandHandler("get_chat_status", self.GetChatStatusHandler))
+    app.add_handler(telegram.ext.CommandHandler("add_user", self.AddUserHandler))
     app.add_handler(
       telegram.ext.MessageHandler(telegram.ext.filters.PHOTO | telegram.ext.filters.VIDEO, self.MediaHandler)
       )
@@ -282,6 +283,39 @@ class BotChannelChat:
       return
     try:
       await update.message.reply_text(f'the process queue size is {self._forward_process_queue.qsize()}, the active user count is {self._active_user_count}')
+    except:
+      pass
+
+  async def AddUserHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if user is None:
+      return
+    user_st = self._user_status_dict.get(user.id, None)
+    if user_st is None:
+      return
+    if user_st.permission != kChatPermissionAdminUser:
+      return
+    # parse user id
+    try:
+      user_id = int(update.effective_message.text.replace("/add_user ", ""))
+      if user_id in self._user_status_dict:
+        try:
+          await update.message.reply_text('user already exists: {}'.format(user_id))
+        except Exception as e:
+          print(e)
+          pass
+      else:
+        await self.AddNewUser(user_id)
+    except:
+      try:
+        await update.message.reply_text('fail to add user: "{}"'.format(update.effective_message.text))
+      except Exception as e:
+        print(e)
+        pass
+      return
+    try:
+      await update.message.reply_text('user added: {}'.format(user_id))
+      self._logger.info("admin {} added user: {}".format(user_st.user_id, user_id))
     except:
       pass
 
