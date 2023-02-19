@@ -4,6 +4,13 @@ user info db
 message process queue
 """
 
+if __name__ == "__main__":
+  import sys, os
+  need_to_add_path = __file__
+  for _ in range(3):
+    need_to_add_path = os.path.dirname(need_to_add_path)
+  sys.path.append(need_to_add_path)  # add root directory
+
 from python_general_lib.environment_setup.logging_setup import *
 from python_general_lib.interface.json_serializable import *
 from utils.async_single_db_auto_commit_serializable_object import *
@@ -403,13 +410,6 @@ async def ImportUsers(root_folder="workspace/bot_channel_chat"):
   bcc._user_status_db.Commit()
 
 if __name__ == "__main__":
-  import sys, os
-  need_to_add_path = __file__
-  for _ in range(3):
-    need_to_add_path = os.path.dirname(need_to_add_path)
-  sys.path.append(need_to_add_path)  # add root directory
-
-
   # BotChannelChatMain("6141949745:AAEcQUrzmnWuDxdpwjJa52IJeiTK9F9vKVo")
   BotChannelChatMain("6141949745:AAEcQUrzmnWuDxdpwjJa52IJeiTK9F9vKVo", "\\\\192.168.1.220\\home\\telegram_workspace\\bot_channel_chat")
 
