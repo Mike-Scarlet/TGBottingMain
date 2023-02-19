@@ -156,7 +156,7 @@ class BotChannelChat:
     self._tg_app = None
     self._loop_task = None
     self._active_user_count = 0
-    self._command_forward_worker_count = 10
+    self._command_forward_worker_count = 12
     self._command_forward_workers = []
     self._command_forward_queue = asyncio.Queue(1)
 
@@ -209,7 +209,6 @@ class BotChannelChat:
   async def StartHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     if user is None:
-      self._logger.info("inrecognized user {} sent start")
       return
     await update.message.reply_text(f'Hello {user.first_name}, your user id is {user.id}, send /join to join the chat, send /current_status to check your status')
 
@@ -219,7 +218,7 @@ class BotChannelChat:
       return
     user_st = self._user_status_dict.get(user.id, None)
     if user_st is None:
-      self._logger.info("inrecognized user {} sent join")
+      self._logger.info("inrecognized user {} - {} sent join".format(user.id, user.full_name))
       return
     if user_st.join_time == 0:
       await self.SetJoinTime(user_st)
@@ -383,9 +382,9 @@ class BotChannelChat:
     return span
 
 
-def BotChannelChatMain(bot_token):
-  LoggingAddFileHandler("workspace/bot_channel_chat/logs.txt")
-  bcc = BotChannelChat("workspace/bot_channel_chat")
+def BotChannelChatMain(bot_token, root_folder="workspace/bot_channel_chat"):
+  LoggingAddFileHandler(root_folder + "/logs.txt")
+  bcc = BotChannelChat(root_folder)
 
   app = telegram.ext.ApplicationBuilder().token(bot_token).build()
   bcc.PrepareHandlers(app)
@@ -394,8 +393,8 @@ def BotChannelChatMain(bot_token):
 
   app.run_polling()
 
-async def ImportUsers():
-  bcc = BotChannelChat("workspace/bot_channel_chat")
+async def ImportUsers(root_folder="workspace/bot_channel_chat"):
+  bcc = BotChannelChat(root_folder)
   await bcc.Initiate(None)
   with open("workspace/xh_members.json", "r") as f:
     member_id_list = json.load(f)
@@ -404,8 +403,19 @@ async def ImportUsers():
   bcc._user_status_db.Commit()
 
 if __name__ == "__main__":
+  import sys, os
+  need_to_add_path = __file__
+  for _ in range(3):
+    need_to_add_path = os.path.dirname(need_to_add_path)
+  sys.path.append(need_to_add_path)  # add root directory
+
+
   # BotChannelChatMain("6141949745:AAEcQUrzmnWuDxdpwjJa52IJeiTK9F9vKVo")
+  BotChannelChatMain("6141949745:AAEcQUrzmnWuDxdpwjJa52IJeiTK9F9vKVo", "\\\\192.168.1.220\\home\\telegram_workspace\\bot_channel_chat")
+
   # asyncio.run(ImportUsers())
+
   with open("config/chat_bot_token.txt", "r") as f:
     token = f.read()
-  BotChannelChatMain(token)
+  # BotChannelChatMain(token)
+  BotChannelChatMain(token, "\\\\192.168.1.220\\home\\telegram_workspace\\bot_channel_chat")
