@@ -295,7 +295,6 @@ class BotChannelChat:
         break
       async with self._user_status_dict_access_lock:
         user_status_list = list(self._user_status_dict.items())
-      bot: telegram.Bot = self._tg_app.bot
       for user_id, status in user_status_list:
         if status.status in (kChatStatusInactive, kChatStatusMute) or \
            status.permission == kChatPermissionInvalidUser:
@@ -375,6 +374,9 @@ class BotChannelChat:
     status.status = kChatStatusInactive
     self._logger.info("user inactivated: {}".format(status.user_id))
     await self._user_status_db.UpdateUserCurrentStatus(status.user_id, status)
+    # notify
+    bot: telegram.Bot = self._tg_app.bot
+    await bot.send_message(status.user_id, "you have be inactive for a while, your active status is set to False, send a video or photo to reactivate")
 
   def GetEnsureActiveSpanByPermission(self, permission):
     span = 0
@@ -411,7 +413,7 @@ async def ImportUsers(root_folder="workspace/bot_channel_chat"):
 
 if __name__ == "__main__":
   # BotChannelChatMain("6141949745:AAEcQUrzmnWuDxdpwjJa52IJeiTK9F9vKVo")
-  BotChannelChatMain("6141949745:AAEcQUrzmnWuDxdpwjJa52IJeiTK9F9vKVo", "\\\\192.168.1.220\\home\\telegram_workspace\\bot_channel_chat")
+  # BotChannelChatMain("6141949745:AAEcQUrzmnWuDxdpwjJa52IJeiTK9F9vKVo", "\\\\192.168.1.220\\home\\telegram_workspace\\bot_channel_chat")
 
   # asyncio.run(ImportUsers())
 
