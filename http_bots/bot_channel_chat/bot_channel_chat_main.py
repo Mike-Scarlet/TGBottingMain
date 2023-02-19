@@ -131,6 +131,20 @@ class FromMessagesManageDatabase(AsyncSingleDBAutoCommitSerializableObject):
     async with self._lock:
       self._op.InsertDictToTable(insert_dict, "FromMessages")
       await self.AutoCommitAfter(4.0)
+
+  async def GetFailForwardTasks(self):
+    async with self._lock:
+      all_fail_dict = self._op.SelectFieldFromTable("*", "FromMessages", "forward_status = 0")
+    result = []
+    for fail_dict in all_fail_dict:
+      task = ForwardTask()
+      task.task_index = fail_dict["task_index"]
+      task.from_user_id = fail_dict["from_user_id"]
+      task.from_message_id = fail_dict["from_message_id"]
+      task.file_unique_id = fail_dict["file_unique_id"]
+      result.append(task)
+    return result
+
     
   async def SetSuccessForForwardTask(self, forward_task: ForwardTask):
     async with self._lock:
@@ -207,6 +221,13 @@ class BotChannelChat:
       self._command_forward_workers.append(loop.create_task(self.SimpleForwardWorker()))
 
     self._logger.info("initiate is finished")
+    self._logger.info("start to handle histories")
+    fail_tasks = await self._from_message_db.GetFailForwardTasks()
+    for forward_task in fail_tasks:
+      self._logger.info("add history forward task #{} : {} - {} - {}".format(
+        forward_task.task_index, forward_task.from_user_id, forward_task.from_message_id, forward_task.file_unique_id))
+      await self._forward_process_queue.put(forward_task)
+    self._logger.info("history handle finished")
 
   async def PrepareStop(self, app: telegram.ext.Application):
     # do all clean process here
@@ -327,12 +348,23 @@ class BotChannelChat:
       get_item: ForwardCommand = await self._command_forward_queue.get()
       if get_item is None:
         break
-      await self._tg_app.bot.copy_message(
-            get_item.to_user_id,
-            get_item.task.from_user_id, 
-            get_item.task.from_message_id,
-            caption="#message {}".format(get_item.task.task_index),
-            disable_notification=True)
+      try:
+        await self._tg_app.bot.copy_message(
+              get_item.to_user_id,
+              get_item.task.from_user_id, 
+              get_item.task.from_message_id,
+              caption="#message {}".format(get_item.task.task_index),
+              disable_notification=True)
+      except Exception as e:
+        self._logger.info("forward message {} to {}, raised exception".format(get_item.task.task_index, get_item.to_user_id))
+        self._logger.info("{}".format(e))
+        user_st = self._user_status_dict.get(get_item.to_user_id, None)
+        if user_st is not None:
+          user_st.status = kChatStatusInactive
+          user_st.permission = kChatPermissionGuestUser
+          await self._user_status_db.UpdateUserPermission(get_item.to_user_id, user_st)
+          await self._user_status_db.UpdateUserCurrentStatus(get_item.to_user_id, user_st)
+        
 
   """ private function """
   async def AddNewUser(self, user_id):
