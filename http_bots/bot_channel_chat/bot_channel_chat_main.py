@@ -19,6 +19,12 @@ class ForwardTask:
     self.from_message_id = None
     self.file_unique_id = None
 
+class ForwardCommand:
+  task: ForwardTask
+  def __init__(self) -> None:
+    self.task = None
+    self.to_user_id = None
+
 class ChannelChatUserStatus:
   def __init__(self) -> None:
     self.user_id = None
@@ -150,6 +156,9 @@ class BotChannelChat:
     self._tg_app = None
     self._loop_task = None
     self._active_user_count = 0
+    self._command_forward_worker_count = 10
+    self._command_forward_workers = []
+    self._command_forward_queue = asyncio.Queue(1)
 
   def PrepareHandlers(self, app: telegram.ext.Application):
     app.add_handler(telegram.ext.CommandHandler("start", self.StartHandler))
@@ -187,6 +196,9 @@ class BotChannelChat:
 
     self._loop_task = loop.create_task(self.ForwardWorkerLoop())
 
+    for _ in range(self._command_forward_worker_count):
+      self._command_forward_workers.append(loop.create_task(self.SimpleForwardWorker()))
+
     self._logger.info("initiate is finished")
 
   async def PrepareStop(self, app: telegram.ext.Application):
@@ -197,6 +209,7 @@ class BotChannelChat:
   async def StartHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     if user is None:
+      self._logger.info("inrecognized user {} sent start")
       return
     await update.message.reply_text(f'Hello {user.first_name}, your user id is {user.id}, send /join to join the chat, send /current_status to check your status')
 
@@ -206,6 +219,7 @@ class BotChannelChat:
       return
     user_st = self._user_status_dict.get(user.id, None)
     if user_st is None:
+      self._logger.info("inrecognized user {} sent join")
       return
     if user_st.join_time == 0:
       await self.SetJoinTime(user_st)
@@ -230,7 +244,7 @@ class BotChannelChat:
     user_st = self._user_status_dict.get(user.id, None)
     if user_st is None:
       return
-    await update.message.reply_text(f'the process queue size is {self._forward_process_queue.qsize()}')
+    await update.message.reply_text(f'the process queue size is {self._forward_process_queue.qsize()}, the active user count is {self._active_user_count}')
 
 
   async def MediaHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE):
@@ -288,16 +302,32 @@ class BotChannelChat:
           await self.InactivateUser(status)
         else:
           # do forward
-          await bot.copy_message(
-            user_id,
-            get_result.from_user_id, 
-            get_result.from_message_id,
-            caption="#message {}".format(get_result.task_index),
-            disable_notification=True)
+          command = ForwardCommand()
+          command.task = get_result
+          command.to_user_id = user_id
+          await self._command_forward_queue.put(command)
+          # await bot.copy_message(
+          #   user_id,
+          #   get_result.from_user_id, 
+          #   get_result.from_message_id,
+          #   caption="#message {}".format(get_result.task_index),
+          #   disable_notification=True)
       # set current forward to true
       await self._from_message_db.SetSuccessForForwardTask(get_result)
       self._logger.info("done forward task #{} : {} - {} - {}".format(
           get_result.task_index, get_result.from_user_id, get_result.from_message_id, get_result.file_unique_id))
+
+  async def SimpleForwardWorker(self):
+    while True:
+      get_item: ForwardCommand = await self._command_forward_queue.get()
+      if get_item is None:
+        break
+      await self._tg_app.bot.copy_message(
+            get_item.to_user_id,
+            get_item.task.from_user_id, 
+            get_item.task.from_message_id,
+            caption="#message {}".format(get_item.task.task_index),
+            disable_notification=True)
 
   """ private function """
   async def AddNewUser(self, user_id):
@@ -330,12 +360,14 @@ class BotChannelChat:
     self._active_user_count += 1
     status.status = kChatStatusActive
     status.last_active_time = time.time()
+    self._logger.info("user activated: {}".format(status.user_id))
     await self._user_status_db.UpdateUserCurrentStatus(status.user_id, status)
     await self._user_status_db.UpdateUserLastActiveTime(status.user_id, status)
   
   async def InactivateUser(self, status: ChannelChatUserStatus):
     self._active_user_count -= 1
     status.status = kChatStatusInactive
+    self._logger.info("user inactivated: {}".format(status.user_id))
     await self._user_status_db.UpdateUserCurrentStatus(status.user_id, status)
 
   def GetEnsureActiveSpanByPermission(self, permission):
@@ -343,15 +375,16 @@ class BotChannelChat:
     if permission == kChatPermissionGuestUser:
       span = 28800  # 8 hours
     elif permission == kChatPermissionNormalUser:
-      span = 43200  # 12 hours
+      span = 86400  # 12 hours
     elif permission == kChatPermissionVIPUser:
-      span = 86400  # 24 hours
+      span = 172800  # 24 hours
     elif permission == kChatPermissionAdminUser:
       span = 1e10
     return span
 
 
 def BotChannelChatMain(bot_token):
+  LoggingAddFileHandler("workspace/bot_channel_chat/logs.txt")
   bcc = BotChannelChat("workspace/bot_channel_chat")
 
   app = telegram.ext.ApplicationBuilder().token(bot_token).build()
@@ -371,5 +404,8 @@ async def ImportUsers():
   bcc._user_status_db.Commit()
 
 if __name__ == "__main__":
-  BotChannelChatMain("6141949745:AAEcQUrzmnWuDxdpwjJa52IJeiTK9F9vKVo")
+  # BotChannelChatMain("6141949745:AAEcQUrzmnWuDxdpwjJa52IJeiTK9F9vKVo")
   # asyncio.run(ImportUsers())
+  with open("config/chat_bot_token.txt", "r") as f:
+    token = f.read()
+  BotChannelChatMain(token)
