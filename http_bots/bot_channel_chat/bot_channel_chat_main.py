@@ -15,6 +15,7 @@ from python_general_lib.environment_setup.logging_setup import *
 from python_general_lib.interface.json_serializable import *
 from utils.async_single_db_auto_commit_serializable_object import *
 from http_bots.bot_channel_chat.bot_channel_chat_constants import *
+from utils.command_parser import ParsedCommand
 import telegram
 import telegram.ext
 import os, time
@@ -145,6 +146,10 @@ class FromMessagesManageDatabase(AsyncSingleDBAutoCommitSerializableObject):
       result.append(task)
     return result
 
+  async def GetForwardTaskByTaskIndex(self, task_index):
+    async with self._lock:
+      query_result = self._op.SelectFieldFromTable("*", "FromMessages", "task_index = {}".format(task_index))
+    return query_result
     
   async def SetSuccessForForwardTask(self, forward_task: ForwardTask):
     async with self._lock:
@@ -187,6 +192,9 @@ class BotChannelChat:
     app.add_handler(telegram.ext.CommandHandler("current_status", self.CurrentStatusHandler))
     app.add_handler(telegram.ext.CommandHandler("get_chat_status", self.GetChatStatusHandler))
     app.add_handler(telegram.ext.CommandHandler("add_user", self.AddUserHandler))
+    app.add_handler(telegram.ext.CommandHandler("get_user_status", self.GetUserStatusHandler))
+    app.add_handler(telegram.ext.CommandHandler("set_user_status", self.SetUserStatusHandler))
+    app.add_handler(telegram.ext.CommandHandler("get_message_info", self.GetMessageInfoHandler))
     app.add_handler(
       telegram.ext.MessageHandler(telegram.ext.filters.PHOTO | telegram.ext.filters.VIDEO, self.MediaHandler)
       )
@@ -320,6 +328,80 @@ class BotChannelChat:
     except:
       pass
 
+  async def GetUserStatusHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if user is None:
+      return
+    user_st = self._user_status_dict.get(user.id, None)
+    if user_st is None:
+      return
+    if user_st.permission != kChatPermissionAdminUser:
+      return
+    try:
+      parsed_command = ParsedCommand()
+      parsed_command.ParseCommand(update.effective_message.text)
+      user_id = parsed_command.GetIntParam(0)
+      if user_id is None:
+        raise ValueError("parse param error")
+      get_result = self._user_status_dict.get(user_id, None)
+      if get_result is None:
+        await update.message.reply_text("cannot find user {}".format(user_id))
+        return
+      obj_dict = AutoObjectToJsonHandler(get_result)
+      await update.message.reply_text(json.dumps(obj_dict, indent=2))
+    except Exception as e:
+      await self.ReplyError(update, "GetUserStatusHandler", exception=e)
+
+  async def SetUserStatusHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if user is None:
+      return
+    user_st = self._user_status_dict.get(user.id, None)
+    if user_st is None:
+      return
+    if user_st.permission != kChatPermissionAdminUser:
+      return
+    try:
+      parsed_command = ParsedCommand()
+      parsed_command.ParseCommand(update.effective_message.text)
+      user_id = parsed_command.GetIntParam(0)
+      permission_value = parsed_command.GetIntParam(1)
+      status_value = parsed_command.GetIntParam(2)
+      if user_id is None:
+        raise ValueError("parse param user id error")
+      get_result = self._user_status_dict.get(user_id, None)
+      if get_result is None:
+        await update.message.reply_text("cannot find user {}".format(user_id))
+        return
+      if permission_value is not None:
+        get_result.permission = permission_value
+        await update.message.reply_text("user {} set permission to {}".format(user_id, permission_value))
+      if status_value is not None:
+        get_result.status = status_value
+        await update.message.reply_text("user {} set status to {}".format(user_id, status_value))
+    except Exception as e:
+      await self.ReplyError(update, "SetUserStatusHandler", exception=e)
+
+  async def GetMessageInfoHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if user is None:
+      return
+    user_st = self._user_status_dict.get(user.id, None)
+    if user_st is None:
+      return
+    if user_st.permission != kChatPermissionAdminUser:
+      return
+    try:
+      parsed_command = ParsedCommand()
+      parsed_command.ParseCommand(update.effective_message.text)
+      message_index = parsed_command.GetIntParam(0)
+      if message_index is None:
+        raise ValueError("parse param message_index error")
+      query_result = await self._from_message_db.GetForwardTaskByTaskIndex(message_index)
+      await update.message.reply_text(json.dumps(query_result, indent=2))
+    except Exception as e:
+      await self.ReplyError(update, "SetUserStatusHandler", exception=e)
+
   async def MediaHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE):
     if update.effective_message is None:
       return
@@ -421,11 +503,20 @@ class BotChannelChat:
         
 
   """ private function """
-  async def AddNewUser(self, user_id):
+  async def ReplyError(self, update: telegram.Update, entry_name="", exception=None):
+    try:
+      await update.message.reply_text('[{}] argument error: "{}"'.format(entry_name, update.effective_message.text))
+      if exception is not None:
+        await update.message.reply_text("{}".format(exception))
+    except Exception as e:
+      pass
+
+  async def AddNewUser(self, user_id, permission=kChatPermissionNormalUser):
     get_result = self._user_status_dict.get(user_id, None)
     if get_result is not None:
       return
     st = ChannelChatUserStatus()
+    st.permission = permission
     st.user_id = user_id
     await self._user_status_db.AddUserStatus(st)
     async with self._user_status_dict_access_lock:
@@ -435,7 +526,10 @@ class BotChannelChat:
     if status.status == kChatStatusInactive:
       await self.ActivateUser(status)
       if update is not None:
-        await update.message.reply_text(f'user id: {update.effective_user.id}, activated')
+        try:
+          await update.message.reply_text(f'user id: {update.effective_user.id}, activated')
+        except:
+          pass
     else:
       await self.DirectSetActiveTime(status)
 
