@@ -230,9 +230,8 @@ class BotChannelChat:
       if st.status == kChatStatusActive:
         self._active_user_count += 1
       # history data complement
-      if st.last_active_time > 0 and (st.active_expire_time == 0 or st.active_expire_time is None):
+      if st.active_expire_time == 0 or st.active_expire_time is None:
         st.active_expire_time = st.last_active_time + self.GetMinimumSecondsIntervalByPermission(st.permission) * 2
-        self._logger.info("history complement for user: {}".format(st.user_id))
         await self._user_status_db.UpdateUserLastActiveAndExpireTime(st.user_id, st)
 
     self._loop_task = loop.create_task(self.ForwardWorkerLoop())
