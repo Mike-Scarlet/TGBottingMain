@@ -29,6 +29,7 @@ user_status_initiate_dict = {
       "status": "INTEGER",
       "join_time": "REAL",
       "last_active_time": "REAL",
+      "active_expire_time": "REAL",
     },
     "primary_keys": ["user_id"]
   }

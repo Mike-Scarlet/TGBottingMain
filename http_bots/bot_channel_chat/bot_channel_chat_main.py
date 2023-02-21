@@ -18,7 +18,7 @@ from http_bots.bot_channel_chat.bot_channel_chat_constants import *
 from utils.command_parser import ParsedCommand
 import telegram
 import telegram.ext
-import os, time
+import os, time, datetime
 
 class ForwardTask:
   def __init__(self) -> None:
@@ -40,6 +40,7 @@ class ChannelChatUserStatus:
     self.status = kChatStatusInactive
     self.join_time = 0
     self.last_active_time = 0
+    self.active_expire_time = 0
 
 class UserStatusDatabase(AsyncSingleDBAutoCommitSerializableObject):
   def __init__(self, db_path: str = None) -> None:
@@ -67,6 +68,7 @@ class UserStatusDatabase(AsyncSingleDBAutoCommitSerializableObject):
           "status": user_status.status,
           "join_time": user_status.join_time,
           "last_active_time": user_status.last_active_time,
+          "active_expire_time": user_status.active_expire_time,
         }, 
         "UserStatus", "OR IGNORE")
       await self.AutoCommitAfter(5.0)
@@ -79,10 +81,13 @@ class UserStatusDatabase(AsyncSingleDBAutoCommitSerializableObject):
         "user_id = {}".format(user_id))
       await self.AutoCommitAfter(5.0)
 
-  async def UpdateUserLastActiveTime(self, user_id, user_status: ChannelChatUserStatus):
+  async def UpdateUserLastActiveAndExpireTime(self, user_id, user_status: ChannelChatUserStatus):
     async with self._lock:
       self._op.UpdateFieldFromTable(
-        {"last_active_time": user_status.last_active_time}, 
+        {
+          "last_active_time": user_status.last_active_time,
+          "active_expire_time": user_status.active_expire_time,
+        }, 
         "UserStatus", 
         "user_id = {}".format(user_id))
       await self.AutoCommitAfter(5.0)
@@ -194,6 +199,7 @@ class BotChannelChat:
     app.add_handler(telegram.ext.CommandHandler("add_user", self.AddUserHandler))
     app.add_handler(telegram.ext.CommandHandler("get_user_status", self.GetUserStatusHandler))
     app.add_handler(telegram.ext.CommandHandler("set_user_status", self.SetUserStatusHandler))
+    # app.add_handler(telegram.ext.CommandHandler("punish_user_by_message_id", self.PunishUserByMessageID))  # TODO
     app.add_handler(telegram.ext.CommandHandler("get_message_info", self.GetMessageInfoHandler))
     app.add_handler(
       telegram.ext.MessageHandler(telegram.ext.filters.PHOTO | telegram.ext.filters.VIDEO, self.MediaHandler)
@@ -223,6 +229,11 @@ class BotChannelChat:
       self._user_status_dict[st.user_id] = st
       if st.status == kChatStatusActive:
         self._active_user_count += 1
+      # history data complement
+      if st.last_active_time > 0 and (st.active_expire_time == 0 or st.active_expire_time is None):
+        st.active_expire_time = st.last_active_time + self.GetMinimumSecondsIntervalByPermission(st.permission) * 2
+        self._logger.info("history complement for user: {}".format(st.user_id))
+        await self._user_status_db.UpdateUserLastActiveAndExpireTime(st.user_id, st)
 
     self._loop_task = loop.create_task(self.ForwardWorkerLoop())
 
@@ -262,11 +273,11 @@ class BotChannelChat:
       return
     if user_st.join_time == 0:
       await self.SetJoinTime(user_st)
-    if user_st.permission in (kChatPermissionVIPUser, kChatPermissionAdminUser):
-      await self.ActivateOrSetActiveTime(user_st, update)
+    if user_st.permission not in (kChatPermissionInvalidUser,):
+      await self.UpdateExpireTimeAndActivate(user_st, update, user_active_expire_offset=0)
     else:
       try:
-        await update.message.reply_text(f'send a video or photo to activate')
+        await update.message.reply_text(f'bot error, please contact admin')
       except:
         pass
 
@@ -278,7 +289,7 @@ class BotChannelChat:
     if user_st is None:
       return
     try:
-      await update.message.reply_text(f'your user id: {user_st.user_id}, your active status: {user_st.status != kChatStatusInactive}')
+      await update.message.reply_text(self.UserStatusToInfoString(user_st))
     except:
       pass
 
@@ -407,14 +418,21 @@ class BotChannelChat:
       return
     # TODO: global status check
     # update user current status
-    if update.effective_message.video is not None or update.effective_message.photo is not None:
+    has_video = update.effective_message.video is not None
+    has_photo = update.effective_message.photo is not None and len(update.effective_message.photo) > 0
+
+    if has_video or has_photo:
       # current we only accept exist users
       user_st = self._user_status_dict.get(update.effective_chat.id, None)
       if user_st is None:
         return
-      await self.ActivateOrSetActiveTime(user_st, update)
+
+      if has_video:
+        await self.UpdateExpireTimeAndActivate(user_st, update, 9000)  # 2.5 hours
+      elif has_photo:
+        await self.UpdateExpireTimeAndActivate(user_st, update, 3600)  # 1 hour
     forward_task = None
-    if update.effective_message.video is not None:
+    if has_video:
       # add video
       forward_task = ForwardTask()
       forward_task.from_user_id = update.effective_chat.id
@@ -423,7 +441,7 @@ class BotChannelChat:
       # add to status store db
       await self._from_message_db.AddForwardTask(forward_task)
       await self._forward_process_queue.put(forward_task)
-    if update.effective_message.photo is not None and len(update.effective_message.photo) > 0:
+    if has_photo:
       valid_photo = update.effective_message.photo[-1]
       forward_task = ForwardTask()
       forward_task.from_user_id = update.effective_chat.id
@@ -445,13 +463,12 @@ class BotChannelChat:
       async with self._user_status_dict_access_lock:
         user_status_list = list(self._user_status_dict.items())
       for user_id, status in user_status_list:
+        # TODO: mute handle here is bad
         if status.status in (kChatStatusInactive, kChatStatusMute) or \
            status.permission == kChatPermissionInvalidUser:
           continue
         # different permission handler
-        ensure_active_span = self.GetEnsureActiveSpanByPermission(status.permission)
-        time_since_last_active = time.time() - status.last_active_time
-        if time_since_last_active > ensure_active_span:
+        if time.time() > status.active_expire_time:
           # set in active
           await self.InactivateUser(status)
         else:
@@ -495,6 +512,8 @@ class BotChannelChat:
             await self._user_status_db.UpdateUserCurrentStatus(get_item.to_user_id, user_st)
           break
         except Exception as e:
+          if e.message == "Chat not found":
+            break
           self._logger.info("(retry {}) forward message {} to {}, raised exception".format(
               try_cnt, get_item.task.task_index, get_item.to_user_id))
           self._logger.info("{}".format(e))
@@ -503,6 +522,39 @@ class BotChannelChat:
         
 
   """ private function """
+  def UserStatusToInfoString(self, user_st: ChannelChatUserStatus):
+    st = f"your user id: {user_st.user_id}\nyour active status: {user_st.status != kChatStatusInactive}"
+    if user_st.status != kChatStatusInactive:
+      seconds_diff = user_st.active_expire_time - time.time()
+      if seconds_diff > 0:
+        days = round(seconds_diff // 86400)
+        hours = round((seconds_diff % 86400) // 3600)
+        minutes = round((seconds_diff % 3600) // 60)
+        st += f"\nyour active status expires in:\n  {days} day(s) {hours} hour(s) {minutes} minute(s)"
+    return st
+
+  async def RawUpdateUserActiveAndExpireTimeByNow(self, status: ChannelChatUserStatus, min_interval_value, max_interval_value, expire_time_offset=0):
+    status.last_active_time = time.time()
+    # update expire time
+    min_expire_time = min_interval_value + status.last_active_time
+    max_expire_time = max_interval_value + status.last_active_time
+
+    if status.active_expire_time < min_expire_time:
+      status.active_expire_time = min_expire_time
+    status.active_expire_time += expire_time_offset
+    if status.active_expire_time > max_expire_time:
+      status.active_expire_time = max_expire_time
+
+    await self._user_status_db.UpdateUserLastActiveAndExpireTime(status.user_id, status)
+
+  async def UpdateUserActiveAndExpireTimeByDefaultPermissionByNow(self, status: ChannelChatUserStatus, expire_time_offset=0):
+    await self.RawUpdateUserActiveAndExpireTimeByNow(
+      status,
+      self.GetMinimumSecondsIntervalByPermission(status.permission), 
+      self.GetMaximumSecondsIntervalByPermission(status.permission),
+      expire_time_offset
+    )
+
   async def ReplyError(self, update: telegram.Update, entry_name="", exception=None):
     try:
       await update.message.reply_text('[{}] argument error: "{}"'.format(entry_name, update.effective_message.text))
@@ -522,32 +574,27 @@ class BotChannelChat:
     async with self._user_status_dict_access_lock:
       self._user_status_dict[user_id] = st
 
-  async def ActivateOrSetActiveTime(self, status: ChannelChatUserStatus, update: telegram.Update=None):
+  async def UpdateExpireTimeAndActivate(self, status: ChannelChatUserStatus, update: telegram.Update=None, user_active_expire_offset=0):
+    # expire time
+    await self.UpdateUserActiveAndExpireTimeByDefaultPermissionByNow(status, user_active_expire_offset)
     if status.status == kChatStatusInactive:
+      # also do activate
       await self.ActivateUser(status)
       if update is not None:
         try:
           await update.message.reply_text(f'user id: {update.effective_user.id}, activated')
         except:
           pass
-    else:
-      await self.DirectSetActiveTime(status)
 
   async def SetJoinTime(self, status: ChannelChatUserStatus):
     status.join_time = time.time()
     await self._user_status_db.UpdateUserJoinTime(status.user_id, status)
 
-  async def DirectSetActiveTime(self, status: ChannelChatUserStatus):
-    status.last_active_time = time.time()
-    await self._user_status_db.UpdateUserLastActiveTime(status.user_id, status)
-
   async def ActivateUser(self, status: ChannelChatUserStatus):
     self._active_user_count += 1
     status.status = kChatStatusActive
-    status.last_active_time = time.time()
     self._logger.info("user activated: {}".format(status.user_id))
     await self._user_status_db.UpdateUserCurrentStatus(status.user_id, status)
-    await self._user_status_db.UpdateUserLastActiveTime(status.user_id, status)
   
   async def InactivateUser(self, status: ChannelChatUserStatus):
     self._active_user_count -= 1
@@ -557,20 +604,32 @@ class BotChannelChat:
     # notify
     bot: telegram.Bot = self._tg_app.bot
     try:
-      await bot.send_message(status.user_id, "you have be inactive for a while, your active status is set to False, send a video or photo to reactivate")
+      await bot.send_message(status.user_id, "you have been inactive for a while, your active status is set to False, send a video or photo or /join to reactivate")
     except Exception as e:
       self._logger.info("send inactive message to {} failed".format(status.user_id))
 
-  def GetEnsureActiveSpanByPermission(self, permission):
+  def GetMinimumSecondsIntervalByPermission(self, permission):
     span = 0
     if permission == kChatPermissionGuestUser:
       span = 28800  # 8 hours
     elif permission == kChatPermissionNormalUser:
-      span = 86400  # 12 hours
+      span = 43200  # 12 hours
     elif permission == kChatPermissionVIPUser:
-      span = 172800  # 24 hours
+      span = 172800  # 48 hours
     elif permission == kChatPermissionAdminUser:
-      span = 1e10
+      span = 1e9
+    return span
+
+  def GetMaximumSecondsIntervalByPermission(self, permission):
+    span = 0
+    if permission == kChatPermissionGuestUser:
+      span = 86400  # 24 hours
+    elif permission == kChatPermissionNormalUser:
+      span = 172800  # 48 hours
+    elif permission == kChatPermissionVIPUser:
+      span = 345600  # 96 hours
+    elif permission == kChatPermissionAdminUser:
+      span = 2e9
     return span
 
 
