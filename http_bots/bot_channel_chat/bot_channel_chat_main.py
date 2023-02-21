@@ -199,7 +199,7 @@ class BotChannelChat:
     app.add_handler(telegram.ext.CommandHandler("add_user", self.AddUserHandler))
     app.add_handler(telegram.ext.CommandHandler("get_user_status", self.GetUserStatusHandler))
     app.add_handler(telegram.ext.CommandHandler("set_user_status", self.SetUserStatusHandler))
-    # app.add_handler(telegram.ext.CommandHandler("punish_user_by_message_id", self.PunishUserByMessageID))  # TODO
+    app.add_handler(telegram.ext.CommandHandler("punish_user_by_message_id", self.PunishUserByMessageID))
     app.add_handler(telegram.ext.CommandHandler("get_message_info", self.GetMessageInfoHandler))
     app.add_handler(
       telegram.ext.MessageHandler(telegram.ext.filters.PHOTO | telegram.ext.filters.VIDEO, self.MediaHandler)
@@ -391,6 +391,33 @@ class BotChannelChat:
         await update.message.reply_text("user {} set status to {}".format(user_id, status_value))
     except Exception as e:
       await self.ReplyError(update, "SetUserStatusHandler", exception=e)
+
+  async def PunishUserByMessageID(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if user is None:
+      return
+    user_st = self._user_status_dict.get(user.id, None)
+    if user_st is None:
+      return
+    if user_st.permission != kChatPermissionAdminUser:
+      return
+    try:
+      parsed_command = ParsedCommand()
+      parsed_command.ParseCommand(update.effective_message.text)
+      message_index = parsed_command.GetIntParam(0)
+      if message_index is None:
+        raise ValueError("parse param message_index error")
+      query_result = await self._from_message_db.GetForwardTaskByTaskIndex(message_index)
+      if len(query_result) != 1:
+        raise ValueError("PunishUserByMessageID query_result count is not 1: {}".format(query_result))
+      queried_user_id = query_result[0]["from_user_id"]
+      queried_user_st = self._user_status_dict.get(queried_user_id, None)
+      if queried_user_st is None:
+        raise ValueError("queried_user_st is None")
+      self.PunishUser(queried_user_st)
+      await update.message.reply_text("done punish {}\n".format(queried_user_id) + json.dumps(query_result, indent=2))
+    except Exception as e:
+      await self.ReplyError(update, "PunishUserByMessageID", exception=e)
 
   async def GetMessageInfoHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
@@ -606,6 +633,18 @@ class BotChannelChat:
       await bot.send_message(status.user_id, "you have been inactive for a while, your active status is set to False, send a video or photo or /join to reactivate")
     except Exception as e:
       self._logger.info("send inactive message to {} failed".format(status.user_id))
+
+  async def PunishUser(self, status: ChannelChatUserStatus, source_message_index):
+    self._active_user_count -= 1
+    status.status = kChatStatusInactive
+    self._logger.info("user punished: {}".format(status.user_id))
+    await self._user_status_db.UpdateUserCurrentStatus(status.user_id, status)
+    # notify
+    bot: telegram.Bot = self._tg_app.bot
+    try:
+      await bot.send_message(status.user_id, "you are punished by #message {}, now your active status is False".format(source_message_index))
+    except Exception as e:
+      self._logger.info("send punish message to {} failed".format(status.user_id))
 
   def GetMinimumSecondsIntervalByPermission(self, permission):
     span = 0
