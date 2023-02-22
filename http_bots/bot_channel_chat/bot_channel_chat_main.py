@@ -540,9 +540,11 @@ class BotChannelChat:
         except Exception as e:
           if e.message == "Chat not found":
             break
+          if e.message == "Message to copy not found":
+            break
           self._logger.info("(retry {}) forward message {} to {}, raised exception".format(
               try_cnt, get_item.task.task_index, get_item.to_user_id))
-          self._logger.info("{}".format(e))
+          self._logger.info("{} - {}".format(type(e), e))
           await asyncio.sleep(5.0)  # wait 5 secs
         
         
