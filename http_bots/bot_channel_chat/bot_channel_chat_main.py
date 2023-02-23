@@ -414,7 +414,7 @@ class BotChannelChat:
       queried_user_st = self._user_status_dict.get(queried_user_id, None)
       if queried_user_st is None:
         raise ValueError("queried_user_st is None")
-      self.PunishUser(queried_user_st)
+      self.PunishUser(queried_user_st, message_index)
       await update.message.reply_text("done punish {}\n".format(queried_user_id) + json.dumps(query_result, indent=2))
     except Exception as e:
       await self.ReplyError(update, "PunishUserByMessageID", exception=e)
@@ -698,6 +698,7 @@ if __name__ == "__main__":
   # BotChannelChatMain("6141949745:AAEcQUrzmnWuDxdpwjJa52IJeiTK9F9vKVo", "\\\\192.168.1.220\\home\\telegram_workspace\\bot_channel_chat")
 
   # asyncio.run(ImportUsers())
+  # telegram.ext.Application
 
   with open("config/chat_bot_token.txt", "r") as f:
     token = f.read()
