@@ -192,15 +192,27 @@ class BotChannelChat:
     self._command_forward_queue = asyncio.Queue(1)
 
   def PrepareHandlers(self, app: telegram.ext.Application):
-    app.add_handler(telegram.ext.CommandHandler("start", self.StartHandler))
-    app.add_handler(telegram.ext.CommandHandler("join", self.JoinHandler))
-    app.add_handler(telegram.ext.CommandHandler("current_status", self.CurrentStatusHandler))
-    app.add_handler(telegram.ext.CommandHandler("get_chat_status", self.GetChatStatusHandler))
-    app.add_handler(telegram.ext.CommandHandler("add_user", self.AddUserHandler))
-    app.add_handler(telegram.ext.CommandHandler("get_user_status", self.GetUserStatusHandler))
-    app.add_handler(telegram.ext.CommandHandler("set_user_status", self.SetUserStatusHandler))
-    app.add_handler(telegram.ext.CommandHandler("punish_user_by_message_id", self.PunishUserByMessageID))
-    app.add_handler(telegram.ext.CommandHandler("get_message_info", self.GetMessageInfoHandler))
+    # command handler
+    self._general_user_commands_desc_cb_level_list = [
+      ["start", "start the bot", self.StartHandler],
+      ["join", "join the chat and activate your status", self.JoinHandler],
+      ["current_status", "get your current status", self.CurrentStatusHandler],
+      ["get_chat_status", "get the active member of the chat and check if the bot is valid", self.GetChatStatusHandler],
+    ]
+    self._administrative_commands_desc_cb_level_list = [
+      ["add_user", "add user by user id", self.AddUserHandler],
+      ["get_user_status", "get user status by user id", self.GetUserStatusHandler],
+      ["set_user_status", "set user status by user id", self.SetUserStatusHandler],
+      ["punish_user_by_message_id", "punish user status by message id", self.PunishUserByMessageID],
+      ["get_message_info", "get message info by message id", self.GetMessageInfoHandler],
+      ["extra_process_function", "abstract extra process function", self.ExtraProcessFunctionHandler],
+    ]
+    command_handler_grps = [self._general_user_commands_desc_cb_level_list, self._administrative_commands_desc_cb_level_list]
+    for handler_grp in command_handler_grps:
+      for handler in handler_grp:
+        app.add_handler(telegram.ext.CommandHandler(handler[0], handler[2]))
+
+    # media handler
     app.add_handler(
       telegram.ext.MessageHandler(telegram.ext.filters.PHOTO | telegram.ext.filters.VIDEO, self.MediaHandler)
       )
@@ -309,9 +321,7 @@ class BotChannelChat:
     if user is None:
       return
     user_st = self._user_status_dict.get(user.id, None)
-    if user_st is None:
-      return
-    if user_st.permission != kChatPermissionAdminUser:
+    if not self.DoesUserHasAdminRight(user_st):
       return
     # parse user id
     try:
@@ -343,9 +353,7 @@ class BotChannelChat:
     if user is None:
       return
     user_st = self._user_status_dict.get(user.id, None)
-    if user_st is None:
-      return
-    if user_st.permission != kChatPermissionAdminUser:
+    if not self.DoesUserHasAdminRight(user_st):
       return
     try:
       parsed_command = ParsedCommand()
@@ -367,9 +375,7 @@ class BotChannelChat:
     if user is None:
       return
     user_st = self._user_status_dict.get(user.id, None)
-    if user_st is None:
-      return
-    if user_st.permission != kChatPermissionAdminUser:
+    if not self.DoesUserHasAdminRight(user_st):
       return
     try:
       parsed_command = ParsedCommand()
@@ -397,9 +403,7 @@ class BotChannelChat:
     if user is None:
       return
     user_st = self._user_status_dict.get(user.id, None)
-    if user_st is None:
-      return
-    if user_st.permission != kChatPermissionAdminUser:
+    if not self.DoesUserHasAdminRight(user_st):
       return
     try:
       parsed_command = ParsedCommand()
@@ -414,7 +418,7 @@ class BotChannelChat:
       queried_user_st = self._user_status_dict.get(queried_user_id, None)
       if queried_user_st is None:
         raise ValueError("queried_user_st is None")
-      self.PunishUser(queried_user_st, message_index)
+      await self.PunishUser(queried_user_st, message_index)
       await update.message.reply_text("done punish {}\n".format(queried_user_id) + json.dumps(query_result, indent=2))
     except Exception as e:
       await self.ReplyError(update, "PunishUserByMessageID", exception=e)
@@ -424,9 +428,7 @@ class BotChannelChat:
     if user is None:
       return
     user_st = self._user_status_dict.get(user.id, None)
-    if user_st is None:
-      return
-    if user_st.permission != kChatPermissionAdminUser:
+    if not self.DoesUserHasAdminRight(user_st):
       return
     try:
       parsed_command = ParsedCommand()
@@ -438,6 +440,38 @@ class BotChannelChat:
       await update.message.reply_text(json.dumps(query_result, indent=2))
     except Exception as e:
       await self.ReplyError(update, "SetUserStatusHandler", exception=e)
+
+  async def ExtraProcessFunctionHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if user is None:
+      return
+    user_st = self._user_status_dict.get(user.id, None)
+    if not self.DoesUserHasAdminRight(user_st):
+      return
+    try:
+      parsed_command = ParsedCommand()
+      parsed_command.ParseCommand(update.effective_message.text)
+      command_name = parsed_command.GetStringParam(0)
+      if command_name == "set_my_command_menu":
+        command_str_pairs = []
+        for l in self._general_user_commands_desc_cb_level_list:
+          command_str_pairs.append((l[0], l[1]))
+        for l in self._administrative_commands_desc_cb_level_list:
+          command_str_pairs.append((l[0], l[1]))
+        await self._tg_app.bot.set_my_commands(command_str_pairs, telegram.BotCommandScopeChat(user_st.user_id))
+      elif command_name == "set_global_command_menu":
+        command_str_pairs = []
+        for l in self._general_user_commands_desc_cb_level_list:
+          command_str_pairs.append((l[0], l[1]))
+        # bot: telegram.Bot = None
+        # bot.set_my_commands()
+        await self._tg_app.bot.set_chat_menu_button(chat_id=None, menu_button=telegram.MenuButtonCommands())
+        await self._tg_app.bot.set_my_commands(command_str_pairs, telegram.BotCommandScopeDefault())
+      else:
+        raise ValueError("unrecognized command: {}".format(command_name))
+      await update.message.reply_text("handle command {} done".format(command_name))
+    except Exception as e:
+      await self.ReplyError(update, "ExtraProcessFunctionHandler", exception=e)
 
   async def MediaHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE):
     if update.effective_message is None:
@@ -550,15 +584,26 @@ class BotChannelChat:
         
 
   """ private function """
+  def DoesUserHasAdminRight(self, user_st: ChannelChatUserStatus):
+    try:
+      if user_st is None:
+        return False
+      if user_st.permission < kChatPermissionAdminUser:
+        return False
+      return True
+    except Exception as e:
+      self._logger.warning("error in DoesUserHasAdminRight: {} - {}", type(e), e)
+      return False
+
   def UserStatusToInfoString(self, user_st: ChannelChatUserStatus):
-    st = f"your user id: {user_st.user_id}\nyour active status: {user_st.status != kChatStatusInactive}"
+    st = "your user id: {}\nyour active status: {}".format(user_st.user_id, user_st.status != kChatStatusInactive)
     if user_st.status != kChatStatusInactive:
       seconds_diff = user_st.active_expire_time - time.time()
       if seconds_diff > 0:
         days = round(seconds_diff // 86400)
         hours = round((seconds_diff % 86400) // 3600)
         minutes = round((seconds_diff % 3600) // 60)
-        st += f"\nyour active status expires in:\n  {days} day(s) {hours} hour(s) {minutes} minute(s)"
+        st += "\nyour active status expires in:\n  {} day(s) {} hour(s) {} minute(s)".format(days, hours, minutes)
     return st
 
   async def RawUpdateUserActiveAndExpireTimeByNow(self, status: ChannelChatUserStatus, min_interval_value, max_interval_value, expire_time_offset=0):
@@ -693,14 +738,34 @@ async def ImportUsers(root_folder="workspace/bot_channel_chat"):
     await bcc.AddNewUser(member_id)
   bcc._user_status_db.Commit()
 
+async def RemapPermissions(root_folder="workspace/bot_channel_chat"):
+  raise ValueError()
+  bcc = BotChannelChat(root_folder)
+  await bcc.Initiate(None)
+
+  permission_map = {
+    0: kChatPermissionInvalidUser,
+    1: kChatPermissionAdminUser,
+    2: kChatPermissionVIPUser,
+    3: kChatPermissionNormalUser,
+    4: kChatPermissionGuestUser
+  }
+ 
+  for uid, status in bcc._user_status_dict.items():
+    status.permission = permission_map[status.permission]
+    await bcc._user_status_db.UpdateUserPermission(uid, status)
+  bcc._user_status_db.Commit()
+
 if __name__ == "__main__":
-  # BotChannelChatMain("6141949745:AAEcQUrzmnWuDxdpwjJa52IJeiTK9F9vKVo")
+  BotChannelChatMain("6141949745:AAEcQUrzmnWuDxdpwjJa52IJeiTK9F9vKVo")
   # BotChannelChatMain("6141949745:AAEcQUrzmnWuDxdpwjJa52IJeiTK9F9vKVo", "\\\\192.168.1.220\\home\\telegram_workspace\\bot_channel_chat")
+
+  # asyncio.run(RemapPermissions())
 
   # asyncio.run(ImportUsers())
   # telegram.ext.Application
 
-  with open("config/chat_bot_token.txt", "r") as f:
-    token = f.read()
-  # BotChannelChatMain(token)
-  BotChannelChatMain(token, "\\\\192.168.1.220\\home\\telegram_workspace\\bot_channel_chat")
+  # with open("config/chat_bot_token.txt", "r") as f:
+  #   token = f.read()
+  # # BotChannelChatMain(token)
+  # BotChannelChatMain(token, "\\\\192.168.1.220\\home\\telegram_workspace\\bot_channel_chat")

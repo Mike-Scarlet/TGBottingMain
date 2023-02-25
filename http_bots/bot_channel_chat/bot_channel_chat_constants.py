@@ -1,13 +1,20 @@
 
 from SQLiteWrapper import *
 
+kChatPermissionInvalidUser = 0
+kChatPermissionGuestUser = 10
+kChatPermissionNormalUser = 100
+kChatPermissionVIPUser = 150
+kChatPermissionAdminUser = 199
+kChatPermissionSuperUser = 200
+
 ChatPermissions = [
   kChatPermissionInvalidUser,
   kChatPermissionAdminUser,
   kChatPermissionVIPUser,
   kChatPermissionNormalUser,
   kChatPermissionGuestUser,
-] = range(5)
+]
 
 ChatStatuses = [
   kChatStatusInactive,
