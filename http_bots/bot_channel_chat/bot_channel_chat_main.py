@@ -196,7 +196,7 @@ class BotChannelChat:
     # workers
     self._forward_worker_task = None
 
-    self._command_forward_worker_count = 24
+    self._command_forward_worker_count = 50
     self._command_forward_workers = []
     self._command_forward_queue = asyncio.Queue(1)
 
