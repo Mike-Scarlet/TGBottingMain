@@ -173,8 +173,12 @@ class MirrorCoordinator:
       self._op.Commit()
 
     await self._AddMirrorDistribute(from_chat_id, to_chat_id)
-    await self._all_chat_message_manager.GeneralHistoryRetrieve(to_chat_id, kHistoryRetrieveFromLastMessage)
-    await self._all_chat_message_manager.GeneralHistoryRetrieve(from_chat_id, kHistoryRetrieveFromLastMessage)
+    to_chat_id_success = await self._all_chat_message_manager.GeneralHistoryRetrieve(to_chat_id, kHistoryRetrieveFromLastMessage)
+    if to_chat_id_success:
+      from_chat_id_success = await self._all_chat_message_manager.GeneralHistoryRetrieve(from_chat_id, kHistoryRetrieveFromLastMessage)
+    else:
+      from_chat_id_success = None
+    return from_chat_id_success, to_chat_id_success
 
   async def _HandleExistTasks(self):
     select_results = self._op.SelectFieldFromTable("*", "MirrorTasks", "is_active == 1")

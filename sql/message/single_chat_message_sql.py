@@ -2,30 +2,20 @@
 from SQLiteWrapper import *
 
 single_chat_message_initiate_dict = {
-  "Messages": {
+  "LocalRetrieve": {
     "field_definition": {
       # > MAIN FIELDS
-      "id": "INTEGER UNIQUE NOT NULL",
-      "chat_id": "TEXT",
-      "from_user": "INTEGER",
-      "date": "INTEGER",  # timestamp from utc
-      "edit_date": "INTEGER",  # timestamp from utc
-      "media": "TEXT",   # pyrogram.enums.MessageMediaType
-      "service": "TEXT",   # pyrogram.enums.MessageServiceType
-      "media_group_id": "TEXT",
-      "author_signature": "TEXT",
-      "text": "TEXT",
-      "caption": "TEXT",
-      # "entities",
-      # "caption_entities",
-      # > SUB FIELDS
-      "file_id": "TEXT",
-      "file_unique_id": "TEXT",  # use this to map to file key
-      "message_source": "INTEGER",  # usage
-      # > USER FIELDS
-      "__is_removed": "INTEGER DEFAULT 0",
+      "chat_id": "INTEGER UNIQUE NOT NULL",
     },
-    "primary_keys": "id"
+    "primary_keys": "chat_id"
+  },
+  "Mirror": {
+    "field_definition": {
+      # > MAIN FIELDS
+      "mirror_from_id": "INTEGER UNIQUE NOT NULL",
+      "mirror_to_id": "INTEGER UNIQUE NOT NULL",
+    },
+    "primary_keys": ["mirror_from_id", "mirror_to_id"]
   }
 }
 

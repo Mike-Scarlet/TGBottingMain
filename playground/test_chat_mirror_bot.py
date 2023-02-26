@@ -3,6 +3,7 @@ from python_general_lib.environment_setup.logging_setup import *
 from core.path_store_config import *
 from core.telegram_session_config import *
 from core.telegram_session import *
+from botting.local_mirror_bot import *
 from stage.message import *
 from stage.global_functions import *
 from stage.forward.message_forward_service import MessageForwardService
@@ -24,7 +25,7 @@ async def main():
   telegram_sess = TelegramSession(telegram_sess_cfg)
   await telegram_sess.StartSessionAsync()
 
-  await telegram_sess.ListAllDialogsAsync()
+  # await telegram_sess.ListAllDialogsAsync()
 
   all_chat_message_manager = AllChatMessageManager(telegram_sess, store_cfg.all_chat_db_store_folder)
   telegram_sess.client.add_handler(
@@ -48,9 +49,13 @@ async def main():
   callback_pack_handler.AddFunction(mirror_coordinator.HandleCallbackPack)
   await mirror_coordinator.Initiate()
 
-  mirror_src_group = -1001809280416
-  mirror_target_group = -888678665
-  await mirror_coordinator.AddMirrorTask(mirror_src_group, mirror_target_group)
+  local_mirror_bot = LocalMirrorBot(
+    "workspace/local_mirror_bot", telegram_sess, all_chat_message_manager, mirror_coordinator)
+  await local_mirror_bot.Initiate()
+
+  # mirror_src_group = -1001809280416
+  # mirror_target_group = -888678665
+  # await mirror_coordinator.AddMirrorTask(mirror_src_group, mirror_target_group)
 
   # await all_chat_message_manager.GeneralHistoryRetrieve(-896909962)
   # # await all_chat_message_manager.GeneralHistoryRetrieve(-896909962, kHistoryRetrieveFromBegin, True)
