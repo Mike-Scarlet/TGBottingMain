@@ -22,10 +22,15 @@ async def main():
   # await telegram_sess.ListAllDialogsAsync()
 
   member_id_list = []
+  member_2_result = []
   async for member in telegram_sess.client.get_chat_members(-1001607870587):
     member_id_list.append(member.user.id)
+    chat_name = member.user.first_name
+    member_2_result.append([member.user.id, chat_name])
   with open("workspace/xh_members.json", "w") as f:
     json.dump(member_id_list, f)
+  with open("workspace/xh_members2.json", "w", encoding="utf-8") as f:
+    json.dump(member_2_result, f, ensure_ascii=False)
 
   # all_chat_message_manager = AllChatMessageManager(telegram_sess, store_cfg.all_chat_db_store_folder)
   # telegram_sess.client.add_handler(

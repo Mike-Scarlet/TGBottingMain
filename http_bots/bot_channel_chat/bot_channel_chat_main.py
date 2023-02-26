@@ -216,6 +216,7 @@ class BotChannelChat:
       ["get_user_status", "get user status by user id", self.GetUserStatusHandler],
       ["set_user_status", "set user status by user id", self.SetUserStatusHandler],
       ["punish_user_by_message_id", "punish user status by message id", self.PunishUserByMessageID],
+      ["ban_user_by_message_id", "ban user status by message id", self.BanUserByMessageID],
       ["get_message_info", "get message info by message id", self.GetMessageInfoHandler],
       ["extra_process_function", "abstract extra process function", self.ExtraProcessFunctionHandler],
     ]
@@ -408,6 +409,8 @@ class BotChannelChat:
       if status_value is not None:
         get_result.status = status_value
         await update.message.reply_text("user {} set status to {}".format(user_id, status_value))
+      await self._user_status_db.UpdateUserPermission(user_id, get_result)
+      await self._user_status_db.UpdateUserCurrentStatus(user_id, get_result)
     except Exception as e:
       await self.ReplyError(update, "SetUserStatusHandler", exception=e)
 
@@ -435,6 +438,31 @@ class BotChannelChat:
       await update.message.reply_text("done punish {}\n".format(queried_user_id) + json.dumps(query_result, indent=2))
     except Exception as e:
       await self.ReplyError(update, "PunishUserByMessageID", exception=e)
+
+  async def BanUserByMessageID(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if user is None:
+      return
+    user_st = self._user_status_dict.get(user.id, None)
+    if not self.DoesUserHasAdminRight(user_st):
+      return
+    try:
+      parsed_command = ParsedCommand()
+      parsed_command.ParseCommand(update.effective_message.text)
+      message_index = parsed_command.GetIntParam(0)
+      if message_index is None:
+        raise ValueError("parse param message_index error")
+      query_result = await self._from_message_db.GetForwardTaskByTaskIndex(message_index)
+      if len(query_result) != 1:
+        raise ValueError("BanUserByMessageID query_result count is not 1: {}".format(query_result))
+      queried_user_id = query_result[0]["from_user_id"]
+      queried_user_st = self._user_status_dict.get(queried_user_id, None)
+      if queried_user_st is None:
+        raise ValueError("queried_user_st is None")
+      await self.BanUser(queried_user_st, message_index)
+      await update.message.reply_text("done ban {}\n".format(queried_user_id) + json.dumps(query_result, indent=2))
+    except Exception as e:
+      await self.ReplyError(update, "BanUserByMessageID", exception=e)
 
   async def GetMessageInfoHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
@@ -765,6 +793,20 @@ class BotChannelChat:
     bot: telegram.Bot = self._tg_app.bot
     try:
       await bot.send_message(status.user_id, "you are punished by #message {}, now your active status is False".format(source_message_index))
+    except Exception as e:
+      self._logger.info("send punish message to {} failed".format(status.user_id))
+
+  async def BanUser(self, status: ChannelChatUserStatus, source_message_index):
+    self._active_user_count -= 1
+    status.status = kChatStatusInactive
+    status.permission = kChatPermissionInvalidUser
+    self._logger.info("user banned: {}".format(status.user_id))
+    await self._user_status_db.UpdateUserCurrentStatus(status.user_id, status)
+    await self._user_status_db.UpdateUserPermission(status.user_id, status)
+    # notify
+    bot: telegram.Bot = self._tg_app.bot
+    try:
+      await bot.send_message(status.user_id, "you are banned by #message {}, thanks for your contribution".format(source_message_index))
     except Exception as e:
       self._logger.info("send punish message to {} failed".format(status.user_id))
 
