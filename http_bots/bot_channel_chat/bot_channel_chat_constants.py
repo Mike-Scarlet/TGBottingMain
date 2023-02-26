@@ -10,10 +10,11 @@ kChatPermissionSuperUser = 200
 
 ChatPermissions = [
   kChatPermissionInvalidUser,
-  kChatPermissionAdminUser,
-  kChatPermissionVIPUser,
-  kChatPermissionNormalUser,
   kChatPermissionGuestUser,
+  kChatPermissionNormalUser,
+  kChatPermissionVIPUser,
+  kChatPermissionAdminUser,
+  kChatPermissionSuperUser,
 ]
 
 ChatStatuses = [
@@ -27,6 +28,15 @@ ForwardStatuses = [
   kForwardStatusDone,
   kForwardStatusInvalid,
 ] = range(3)
+
+UserForwardStatuses = [
+  kUserForwardStatusUnknown,
+  kUserForwardStatusSuccess,
+  kUserForwardStatusFailDueToInvalidSource,
+  kUserForwardStatusFailDueToInvalidUser,
+  kUserForwardStatusFailDueToNetworkIssue,
+  kUserForwardStatusFailReasonUnrecognized,
+] = range(6)
 
 user_status_initiate_dict = {
   "UserStatus": {

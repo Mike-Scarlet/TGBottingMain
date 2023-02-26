@@ -19,6 +19,7 @@ from utils.command_parser import ParsedCommand
 import telegram
 import telegram.ext
 import os, time, datetime
+import collections
 
 class ForwardTask:
   def __init__(self) -> None:
@@ -26,12 +27,14 @@ class ForwardTask:
     self.from_user_id = None
     self.from_message_id = None
     self.file_unique_id = None
+    self.total_need_to_forward_count = 0
 
 class ForwardCommand:
   task: ForwardTask
   def __init__(self) -> None:
     self.task = None
     self.to_user_id = None
+    self.user_forward_status = kUserForwardStatusUnknown
 
 class ChannelChatUserStatus:
   def __init__(self) -> None:
@@ -165,7 +168,7 @@ class FromMessagesManageDatabase(AsyncSingleDBAutoCommitSerializableObject):
             forward_task.from_user_id, forward_task.from_message_id))
       await self.AutoCommitAfter(4.0)
 
-  async def SetFailForForwardTask(self, forward_task: ForwardTask):
+  async def SetInvalidForForwardTask(self, forward_task: ForwardTask):
     async with self._lock:
       self._op.UpdateFieldFromTable(
         {"forward_status": kForwardStatusInvalid}, 
@@ -185,11 +188,20 @@ class BotChannelChat:
     self._user_status_dict = {}
     self._forward_process_queue = asyncio.Queue(10000)  # max store 10000 messages
     self._tg_app = None
-    self._loop_task = None
     self._active_user_count = 0
+
+    self._ban_messages_access_lock = asyncio.Lock()
+    self._ban_messages = set()
+
+    # workers
+    self._forward_worker_task = None
+
     self._command_forward_worker_count = 24
     self._command_forward_workers = []
     self._command_forward_queue = asyncio.Queue(1)
+
+    self._command_forward_collect_task = None
+    self._command_forwarded_collect_queue = asyncio.Queue(self._command_forward_worker_count)
 
   def PrepareHandlers(self, app: telegram.ext.Application):
     # command handler
@@ -246,10 +258,11 @@ class BotChannelChat:
         st.active_expire_time = st.last_active_time + self.GetMinimumSecondsIntervalByPermission(st.permission) * 2
         await self._user_status_db.UpdateUserLastActiveAndExpireTime(st.user_id, st)
 
-    self._loop_task = loop.create_task(self.ForwardWorkerLoop())
-
+    # all worker create
+    self._forward_worker_task = loop.create_task(self.ForwardWorkerLoop())
     for _ in range(self._command_forward_worker_count):
       self._command_forward_workers.append(loop.create_task(self.SimpleForwardWorker()))
+    self._command_forward_collect_task = loop.create_task(self.ForwardResultCollector())
 
     self._logger.info("initiate is finished")
     self._logger.info("start to handle histories")
@@ -522,6 +535,9 @@ class BotChannelChat:
         break
       async with self._user_status_dict_access_lock:
         user_status_list = list(self._user_status_dict.items())
+      
+      # collect need to add forward tasks, get this task total forward count
+      valid_user_ids = []
       for user_id, status in user_status_list:
         # TODO: mute handle here is bad
         if status.status in (kChatStatusInactive, kChatStatusMute) or \
@@ -532,20 +548,21 @@ class BotChannelChat:
           # set in active
           await self.InactivateUser(status)
         else:
-          # do forward
-          command = ForwardCommand()
-          command.task = get_result
-          command.to_user_id = user_id
-          await self._command_forward_queue.put(command)
-          # await bot.copy_message(
-          #   user_id,
-          #   get_result.from_user_id, 
-          #   get_result.from_message_id,
-          #   caption="#message {}".format(get_result.task_index),
-          #   disable_notification=True)
+          # collect the user id
+          valid_user_ids.append(user_id)
+
+      # construct forward command
+      get_result.total_need_to_forward_count = len(valid_user_ids)
+      for uid in valid_user_ids:
+        # do forward
+        command = ForwardCommand()
+        command.task = get_result
+        command.to_user_id = uid
+        await self._command_forward_queue.put(command)
+      
       # set current forward to true
-      await self._from_message_db.SetSuccessForForwardTask(get_result)
-      self._logger.info("done forward task #{} : {} - {} - {}".format(
+      # await self._from_message_db.SetSuccessForForwardTask(get_result)
+      self._logger.info("done feed forward task #{} : {} - {} - {}".format(
           get_result.task_index, get_result.from_user_id, get_result.from_message_id, get_result.file_unique_id))
 
   async def SimpleForwardWorker(self):
@@ -554,6 +571,9 @@ class BotChannelChat:
       if get_item is None:
         break
       for try_cnt in range(5):
+        if get_item.task.task_index in self._ban_messages:
+          get_item.user_forward_status = kUserForwardStatusFailDueToInvalidSource
+          break   # early stop
         try:
           await self._tg_app.bot.copy_message(
                 get_item.to_user_id,
@@ -561,8 +581,10 @@ class BotChannelChat:
                 get_item.task.from_message_id,
                 caption="#message {}".format(get_item.task.task_index),
                 disable_notification=True)
+          get_item.user_forward_status = kUserForwardStatusSuccess
           break
         except telegram.error.Forbidden as e:
+          # in this case, we handle situation where user block the bot
           self._logger.info("forward message {} to {}, user is forbidden".format(get_item.task.task_index, get_item.to_user_id))
           user_st = self._user_status_dict.get(get_item.to_user_id, None)
           if user_st is not None:
@@ -570,18 +592,71 @@ class BotChannelChat:
             user_st.permission = kChatPermissionGuestUser
             await self._user_status_db.UpdateUserPermission(get_item.to_user_id, user_st)
             await self._user_status_db.UpdateUserCurrentStatus(get_item.to_user_id, user_st)
+          get_item.user_forward_status = kUserForwardStatusFailDueToInvalidUser
           break
+        except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
+          # in this case, we handle situation where the connection fails
+          if isinstance(e, telegram.error.BadRequest) and e.message == "Message to copy not found":
+            async with self._ban_messages_access_lock:
+              self._ban_messages.add(get_item.task.task_index)
+            get_item.user_forward_status = kUserForwardStatusFailDueToInvalidSource
+            break
+          get_item.user_forward_status = kUserForwardStatusFailDueToNetworkIssue
+          # self._logger.info("(retry {}) forward message {} to {}, raised network error {} - {}".format(
+          #     try_cnt, get_item.task.task_index, get_item.to_user_id, type(e), e))
+          await asyncio.sleep(5.0)  # wait 5 secs
         except Exception as e:
+          get_item.user_forward_status = kUserForwardStatusFailReasonUnrecognized
           if e.message == "Chat not found":
             break
-          if e.message == "Message to copy not found":
-            break
-          self._logger.info("(retry {}) forward message {} to {}, raised exception".format(
-              try_cnt, get_item.task.task_index, get_item.to_user_id))
+          self._logger.info("forward message {} to {}, raised unrecognized exception".format(
+              get_item.task.task_index, get_item.to_user_id))
           self._logger.info("{} - {}".format(type(e), e))
-          await asyncio.sleep(5.0)  # wait 5 secs
-        
-        
+          break
+      await self._command_forwarded_collect_queue.put(get_item)
+
+  async def ForwardResultCollector(self):
+    # to judge a forward status
+    task_id_forward_commands_list_dict: typing.Dict[int, typing.List[ForwardCommand]]
+    task_id_forward_commands_list_dict = collections.defaultdict(list)
+    while True:
+      get_item: ForwardCommand = await self._command_forwarded_collect_queue.get()
+      if get_item is None:
+        break
+      current_list = task_id_forward_commands_list_dict[get_item.task.task_index]
+      current_list.append(get_item)
+      if current_list[0].task.total_need_to_forward_count > len(current_list):
+        continue  # no further process
+      # judge the forward status
+      fail_counter = 0
+      invalid_counter = 0
+      for command in current_list:
+        if command.user_forward_status in (kUserForwardStatusUnknown, 
+                                           kUserForwardStatusFailDueToNetworkIssue, 
+                                           kUserForwardStatusFailReasonUnrecognized):
+          fail_counter += 1
+        elif command.user_forward_status == kUserForwardStatusFailDueToInvalidSource:
+          invalid_counter += 1
+      if invalid_counter > 0:
+        judged_status = kForwardStatusInvalid
+        await self._from_message_db.SetInvalidForForwardTask(get_item.task)
+        try:
+          async with self._ban_messages_access_lock:
+            self._ban_messages.remove(get_item.task.task_index)
+        except:
+          pass
+      elif fail_counter >= 10:
+        judged_status = kForwardStatusInQueue
+      else:
+        judged_status = kUserForwardStatusSuccess
+        await self._from_message_db.SetSuccessForForwardTask(get_item.task)
+      forward_task = get_item.task
+      self._logger.info("forward status is set to {} for task #{} : {} - {} - {}".format(
+          judged_status,
+          forward_task.task_index, forward_task.from_user_id, 
+          forward_task.from_message_id, forward_task.file_unique_id))
+      # remove this collection
+      del task_id_forward_commands_list_dict[get_item.task.task_index]
 
   """ private function """
   def DoesUserHasAdminRight(self, user_st: ChannelChatUserStatus):
@@ -756,16 +831,34 @@ async def RemapPermissions(root_folder="workspace/bot_channel_chat"):
     await bcc._user_status_db.UpdateUserPermission(uid, status)
   bcc._user_status_db.Commit()
 
+async def RefreshActiveTime(root_folder="workspace/bot_channel_chat"):
+  bcc = BotChannelChat(root_folder)
+  await bcc.Initiate(None)
+
+  current_time = time.time()
+  for uid, status in bcc._user_status_dict.items():
+    if status.join_time > 1e7 or status.last_active_time > 1e7:
+      time_diff = status.active_expire_time - status.last_active_time
+      status.active_expire_time = current_time
+      await bcc.RawUpdateUserActiveAndExpireTimeByNow(
+        status, 
+        bcc.GetMinimumSecondsIntervalByPermission(status.permission), 
+        bcc.GetMaximumSecondsIntervalByPermission(status.permission),
+        time_diff)
+      status.status = kChatStatusActive
+      await bcc._user_status_db.UpdateUserCurrentStatus(status.user_id, status)
+  bcc._user_status_db.Commit()
+
 if __name__ == "__main__":
-  BotChannelChatMain("6141949745:AAEcQUrzmnWuDxdpwjJa52IJeiTK9F9vKVo")
+  # BotChannelChatMain("6141949745:AAEcQUrzmnWuDxdpwjJa52IJeiTK9F9vKVo")
   # BotChannelChatMain("6141949745:AAEcQUrzmnWuDxdpwjJa52IJeiTK9F9vKVo", "\\\\192.168.1.220\\home\\telegram_workspace\\bot_channel_chat")
 
-  # asyncio.run(RemapPermissions())
+  # asyncio.run(RefreshActiveTime())
 
   # asyncio.run(ImportUsers())
   # telegram.ext.Application
 
-  # with open("config/chat_bot_token.txt", "r") as f:
-  #   token = f.read()
-  # # BotChannelChatMain(token)
-  # BotChannelChatMain(token, "\\\\192.168.1.220\\home\\telegram_workspace\\bot_channel_chat")
+  with open("config/chat_bot_token.txt", "r") as f:
+    token = f.read()
+  # BotChannelChatMain(token)
+  BotChannelChatMain(token, "\\\\192.168.1.220\\home\\telegram_workspace\\bot_channel_chat")
