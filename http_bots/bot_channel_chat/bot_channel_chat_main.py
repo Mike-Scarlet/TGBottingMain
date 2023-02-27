@@ -545,6 +545,9 @@ class BotChannelChat:
       user_st = self._user_status_dict.get(update.effective_chat.id, None)
       if user_st is None:
         return
+      
+      if user_st.permission == kChatPermissionInvalidUser:
+        return
 
       if has_video:
         await self.UpdateExpireTimeAndActivate(user_st, update, 9000)  # 2.5 hours
@@ -832,17 +835,20 @@ class BotChannelChat:
     bot: telegram.Bot = self._tg_app.bot
     min_hours = self.GetMinimumSecondsIntervalByPermission(status.permission) // 3600
     max_hours = self.GetMaximumSecondsIntervalByPermission(status.permission) // 3600
-    try:
-      await bot.send_message(status.user_id, bot_help_info_str.format(min_hours, max_hours))
-    except Exception as e:
-      self._logger.info("send help message to {} failed".format(status.user_id))
+    for _ in range(3):
+      try:
+        await bot.send_message(status.user_id, bot_help_info_str.format(min_hours, max_hours))
+        break
+      except Exception as e:
+        self._logger.info("send help message to {} failed - {} {}".format(status.user_id, type(e), e))
+        await asyncio.sleep(1)
 
   def GetMinimumSecondsIntervalByPermission(self, permission):
     span = 0
     if permission == kChatPermissionGuestUser:
       span = 28800  # 8 hours
     elif permission == kChatPermissionNormalUser:
-      span = 43200  # 12 hours
+      span = 64800  # 18 hours
     elif permission == kChatPermissionVIPUser:
       span = 172800  # 48 hours
     elif permission == kChatPermissionAdminUser:
@@ -854,7 +860,7 @@ class BotChannelChat:
     if permission == kChatPermissionGuestUser:
       span = 86400  # 24 hours
     elif permission == kChatPermissionNormalUser:
-      span = 172800  # 48 hours
+      span = 345600  # 96 hours
     elif permission == kChatPermissionVIPUser:
       span = 345600  # 96 hours
     elif permission == kChatPermissionAdminUser:
