@@ -207,6 +207,7 @@ class BotChannelChat:
     # command handler
     self._general_user_commands_desc_cb_level_list = [
       ["start", "start the bot", self.StartHandler],
+      ["help", "get help info", self.HelpHandler],
       ["join", "join the chat and activate your status", self.JoinHandler],
       ["current_status", "get your current status", self.CurrentStatusHandler],
       ["get_chat_status", "get the active member of the chat and check if the bot is valid", self.GetChatStatusHandler],
@@ -298,6 +299,7 @@ class BotChannelChat:
       return
     if user_st.join_time == 0:
       await self.SetJoinTime(user_st)
+      await self.SendHelpToUser(user_st)
     if user_st.permission not in (kChatPermissionInvalidUser,):
       await self.UpdateExpireTimeAndActivate(user_st, update, user_active_expire_offset=0)
     else:
@@ -315,6 +317,18 @@ class BotChannelChat:
       return
     try:
       await update.message.reply_text(self.UserStatusToInfoString(user_st))
+    except:
+      pass
+
+  async def HelpHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if user is None:
+      return
+    user_st = self._user_status_dict.get(user.id, None)
+    if user_st is None:
+      return
+    try:
+      await self.SendHelpToUser(user_st)
     except:
       pass
 
@@ -508,6 +522,10 @@ class BotChannelChat:
         # bot.set_my_commands()
         await self._tg_app.bot.set_chat_menu_button(chat_id=None, menu_button=telegram.MenuButtonCommands())
         await self._tg_app.bot.set_my_commands(command_str_pairs, telegram.BotCommandScopeDefault())
+      elif command_name == "broadcast_help":
+        for uid, status in self._user_status_dict.items():
+          if status.join_time > 1e7 or status.last_active_time > 1e7:
+            await self.SendHelpToUser(status)
       else:
         raise ValueError("unrecognized command: {}".format(command_name))
       await update.message.reply_text("handle command {} done".format(command_name))
@@ -809,6 +827,15 @@ class BotChannelChat:
       await bot.send_message(status.user_id, "you are banned by #message {}, thanks for your contribution".format(source_message_index))
     except Exception as e:
       self._logger.info("send punish message to {} failed".format(status.user_id))
+
+  async def SendHelpToUser(self, status: ChannelChatUserStatus):
+    bot: telegram.Bot = self._tg_app.bot
+    min_hours = self.GetMinimumSecondsIntervalByPermission(status.permission) // 3600
+    max_hours = self.GetMaximumSecondsIntervalByPermission(status.permission) // 3600
+    try:
+      await bot.send_message(status.user_id, bot_help_info_str.format(min_hours, max_hours))
+    except Exception as e:
+      self._logger.info("send help message to {} failed".format(status.user_id))
 
   def GetMinimumSecondsIntervalByPermission(self, permission):
     span = 0
