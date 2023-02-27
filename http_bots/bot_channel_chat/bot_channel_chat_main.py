@@ -296,6 +296,10 @@ class BotChannelChat:
     user_st = self._user_status_dict.get(user.id, None)
     if user_st is None:
       self._logger.info("inrecognized user {} - {} sent join".format(user.id, user.full_name))
+      try:
+        await update.message.reply_text(f'bot error, please contact admin')
+      except:
+        pass
       return
     if user_st.join_time == 0:
       await self.SetJoinTime(user_st)
@@ -304,7 +308,7 @@ class BotChannelChat:
       await self.UpdateExpireTimeAndActivate(user_st, update, user_active_expire_offset=0)
     else:
       try:
-        await update.message.reply_text(f'bot error, please contact admin')
+        await update.message.reply_text(f'sorry but you do not have permission')
       except:
         pass
 
