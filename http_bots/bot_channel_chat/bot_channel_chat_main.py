@@ -812,11 +812,14 @@ class BotChannelChat:
   async def PunishUser(self, status: ChannelChatUserStatus, source_message_index):
     self._active_user_count -= 1
     status.status = kChatStatusInactive
+    status.active_expire_time = time.time()
     self._logger.info("user punished: {}".format(status.user_id))
     await self._user_status_db.UpdateUserCurrentStatus(status.user_id, status)
+    await self._user_status_db.UpdateUserLastActiveAndExpireTime(status.user_id, status)
     # notify
     bot: telegram.Bot = self._tg_app.bot
     try:
+      await self.SendHelpToUser(status)
       await bot.send_message(status.user_id, "you are punished by #message {}, now your active status is False".format(source_message_index))
     except Exception as e:
       self._logger.info("send punish message to {} failed".format(status.user_id))
@@ -831,6 +834,7 @@ class BotChannelChat:
     # notify
     bot: telegram.Bot = self._tg_app.bot
     try:
+      await self.SendHelpToUser(status)
       await bot.send_message(status.user_id, "you are banned by #message {}, thanks for your contribution".format(source_message_index))
     except Exception as e:
       self._logger.info("send punish message to {} failed".format(status.user_id))
