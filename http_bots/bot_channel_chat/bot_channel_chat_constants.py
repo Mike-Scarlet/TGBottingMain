@@ -76,8 +76,24 @@ bot_help_info_str = """机器人说明
 保持活跃状态有两种方式，发送/join和发送媒体，其中发送/join会将您的活跃状态刷新至{}小时，发送媒体还会根据媒体类型将活跃状态延长（视频2.5小时，图片1小时），该时间可以累计，激活时间延长的最长时限为{}小时。您可以发送/current_status来确认您的活跃时间剩余时长。
 禁止事项
 1. 发送彻底无关的视频或图片（纯色图片，手机截图等） → 活跃状态会被取消
-2. 刷屏彻底无关的视频或图片 → 会被ban
-3. 发送广告 → 会被ban
+2. 刷屏成年内容 → 活跃状态会被取消
+3. 刷屏彻底无关的视频或图片 → 会被ban
+4. 发送广告 → 会被ban
 如果被错ban，请联系管理
 <尽量少发成人内容哦>
 <大家一起快乐分享吧>"""
+
+
+minimum_seconds_interval_by_permission = {
+  kChatPermissionGuestUser: 28800,   # 8 hours
+  kChatPermissionNormalUser: 64800,  # 18 hours
+  kChatPermissionVIPUser: 172800,    # 48 hours
+  kChatPermissionAdminUser: 1e9,
+}
+
+maximum_seconds_interval_by_permission = {
+  kChatPermissionGuestUser: 86400,    # 24 hours
+  kChatPermissionNormalUser: 345600,  # 96 hours
+  kChatPermissionVIPUser: 345600,     # 96 hours
+  kChatPermissionAdminUser: 2e9,
+}

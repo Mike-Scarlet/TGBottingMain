@@ -14,6 +14,7 @@ if __name__ == "__main__":
 from python_general_lib.environment_setup.logging_setup import *
 from http_bots.bot_channel_chat.bot_channel_chat_sub_databases import *
 from utils.command_parser import ParsedCommand
+from utils.telegram_asyncio_helper import TGFuncWrap
 import telegram
 import telegram.ext
 import os, time, datetime
@@ -123,25 +124,19 @@ class BotChannelChat:
 
   """ handlers """
   async def StartHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
+    user = self.GetUserFromUpdate(update)
     if user is None:
       return
-    try:
-      await update.message.reply_text(f'Hello {user.first_name}, your user id is {user.id}, send /join to join the chat, send /current_status to check your status')
-    except:
-      pass
+    await self.ReplyText(update, "Hello {}, your user id is {}, send /join to join the chat, send /current_status to check your status".format(user.first_name, user.id))
 
   async def JoinHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     if user is None:
       return
-    user_st = self._user_status_dict.get(user.id, None)
+    user_st = self.GetUserStatusFromUpdate(update)
     if user_st is None:
       self._logger.info("inrecognized user {} - {} sent join".format(user.id, user.full_name))
-      try:
-        await update.message.reply_text(f'bot error, please contact admin')
-      except:
-        pass
+      await self.ReplyText(update, 'bot error, please contact admin')
       return
     if user_st.join_time == 0:
       await self.SetJoinTime(user_st)
@@ -149,85 +144,41 @@ class BotChannelChat:
     if user_st.permission not in (kChatPermissionInvalidUser,):
       await self.UpdateExpireTimeAndActivate(user_st, update, user_active_expire_offset=0)
     else:
-      try:
-        await update.message.reply_text(f'sorry but you do not have permission')
-      except:
-        pass
+      await self.ReplyText(update, 'sorry but you do not have permission')
 
   async def CurrentStatusHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    if user is None:
-      return
-    user_st = self._user_status_dict.get(user.id, None)
-    if user_st is None:
-      return
-    try:
-      await update.message.reply_text(self.UserStatusToInfoString(user_st))
-    except:
-      pass
+    user_st = self.GetUserStatusFromUpdate(update)
+    await self.ReplyText(update, self.UserStatusToInfoString(user_st))
 
   async def HelpHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    if user is None:
-      return
-    user_st = self._user_status_dict.get(user.id, None)
-    if user_st is None:
-      return
-    try:
-      await self.SendHelpToUser(user_st)
-    except:
-      pass
+    user_st = self.GetUserStatusFromUpdate(update)
+    await self.SendHelpToUser(user_st)
 
   async def GetChatStatusHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    if user is None:
-      return
-    user_st = self._user_status_dict.get(user.id, None)
-    if user_st is None:
-      return
-    try:
-      await update.message.reply_text(f'the process queue size is {self._forward_process_queue.qsize()}, the active user count is {self._active_user_count}')
-    except:
-      pass
+    user_st = self.GetUserStatusFromUpdate(update)
+    await self.ReplyText(update, 'the process queue size is {}, the active user count is {}'.format(self._forward_process_queue.qsize(), self._active_user_count))
 
   async def AddUserHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    if user is None:
-      return
-    user_st = self._user_status_dict.get(user.id, None)
-    if not self.DoesUserHasAdminRight(user_st):
+    user_st = self.GetAdminUserStatusFromUpdate(update)
+    if user_st is None:
       return
     # parse user id
     try:
       user_id = int(update.effective_message.text.replace("/add_user ", ""))
       if user_id in self._user_status_dict:
-        try:
-          await update.message.reply_text('user already exists: {}'.format(user_id))
-        except Exception as e:
-          print(e)
-          pass
+        await self.ReplyText(update, 'user already exists: {}'.format(user_id))
         return
       else:
         await self.AddNewUser(user_id)
     except:
-      try:
-        await update.message.reply_text('fail to add user: "{}"'.format(update.effective_message.text))
-      except Exception as e:
-        print(e)
-        pass
+      await self.ReplyText(update, 'fail to add user: "{}"'.format(update.effective_message.text))
       return
-    try:
-      await update.message.reply_text('user added: {}'.format(user_id))
-      self._logger.info("admin {} added user: {}".format(user_st.user_id, user_id))
-    except:
-      pass
+    await self.ReplyText(update, 'user added: {}'.format(user_id))
+    self._logger.info("admin {} added user: {}".format(user_st.user_id, user_id))
 
   async def GetUserStatusHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    if user is None:
-      return
-    user_st = self._user_status_dict.get(user.id, None)
-    if not self.DoesUserHasAdminRight(user_st):
+    user_st = self.GetAdminUserStatusFromUpdate(update)
+    if user_st is None:
       return
     try:
       parsed_command = ParsedCommand()
@@ -245,11 +196,8 @@ class BotChannelChat:
       await self.ReplyError(update, "GetUserStatusHandler", exception=e)
 
   async def SetUserStatusHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    if user is None:
-      return
-    user_st = self._user_status_dict.get(user.id, None)
-    if not self.DoesUserHasAdminRight(user_st):
+    user_st = self.GetAdminUserStatusFromUpdate(update)
+    if user_st is None:
       return
     try:
       parsed_command = ParsedCommand()
@@ -275,11 +223,8 @@ class BotChannelChat:
       await self.ReplyError(update, "SetUserStatusHandler", exception=e)
 
   async def PunishUserByMessageID(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    if user is None:
-      return
-    user_st = self._user_status_dict.get(user.id, None)
-    if not self.DoesUserHasAdminRight(user_st):
+    user_st = self.GetAdminUserStatusFromUpdate(update)
+    if user_st is None:
       return
     try:
       parsed_command = ParsedCommand()
@@ -300,11 +245,8 @@ class BotChannelChat:
       await self.ReplyError(update, "PunishUserByMessageID", exception=e)
 
   async def BanUserByMessageID(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    if user is None:
-      return
-    user_st = self._user_status_dict.get(user.id, None)
-    if not self.DoesUserHasAdminRight(user_st):
+    user_st = self.GetAdminUserStatusFromUpdate(update)
+    if user_st is None:
       return
     try:
       parsed_command = ParsedCommand()
@@ -325,11 +267,8 @@ class BotChannelChat:
       await self.ReplyError(update, "BanUserByMessageID", exception=e)
 
   async def GetMessageInfoHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    if user is None:
-      return
-    user_st = self._user_status_dict.get(user.id, None)
-    if not self.DoesUserHasAdminRight(user_st):
+    user_st = self.GetAdminUserStatusFromUpdate(update)
+    if user_st is None:
       return
     try:
       parsed_command = ParsedCommand()
@@ -343,11 +282,8 @@ class BotChannelChat:
       await self.ReplyError(update, "SetUserStatusHandler", exception=e)
 
   async def ExtraProcessFunctionHandler(self, update: telegram.Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    if user is None:
-      return
-    user_st = self._user_status_dict.get(user.id, None)
-    if not self.DoesUserHasAdminRight(user_st):
+    user_st = self.GetAdminUserStatusFromUpdate(update)
+    if user_st is None:
       return
     try:
       parsed_command = ParsedCommand()
@@ -576,6 +512,36 @@ class BotChannelChat:
         st += "\nyour active status expires in:\n  {} day(s) {} hour(s) {} minute(s)".format(days, hours, minutes)
     return st
 
+  def GetMinimumSecondsIntervalByPermission(self, permission):
+    return minimum_seconds_interval_by_permission.get(permission, 0)
+
+  def GetMaximumSecondsIntervalByPermission(self, permission):
+    return maximum_seconds_interval_by_permission.get(permission, 0)
+
+  def GetUserFromUpdate(self, update: telegram.Update):
+    return update.effective_user
+
+  def GetUserStatusFromUpdate(self, update: telegram.Update):
+    try:
+      user_st = self._user_status_dict.get(update.effective_user.id, None)
+      return user_st
+    except:
+      return None
+
+  def GetAdminUserStatusFromUpdate(self, update: telegram.Update):
+    try:
+      user_st = self._user_status_dict.get(update.effective_user.id, None)
+      if self.DoesUserHasAdminRight(user_st):
+        return user_st
+      return None
+    except:
+      return None
+
+  async def ReplyText(self, update: telegram.Update, *args, **kwargs):
+    async def ReplyImpl(update: telegram.Update, *args, **kwargs):
+      return await update.message.reply_text(*args, **kwargs)
+    await TGFuncWrap(ReplyImpl(*args, **kwargs))
+
   async def RawUpdateUserActiveAndExpireTimeByNow(self, status: ChannelChatUserStatus, min_interval_value, max_interval_value, expire_time_offset=0):
     status.last_active_time = time.time()
     # update expire time
@@ -624,10 +590,7 @@ class BotChannelChat:
       # also do activate
       await self.ActivateUser(status)
       if update is not None:
-        try:
-          await update.message.reply_text(f'user id: {update.effective_user.id}, activated')
-        except:
-          pass
+        await self.ReplyText(update, 'user id: {}, activated'.format(update.effective_user.id))
 
   async def SetJoinTime(self, status: ChannelChatUserStatus):
     status.join_time = time.time()
@@ -679,7 +642,7 @@ class BotChannelChat:
       await self.SendHelpToUser(status)
       await bot.send_message(status.user_id, "you are banned by #message {}, thanks for your contribution".format(source_message_index))
     except Exception as e:
-      self._logger.info("send punish message to {} failed".format(status.user_id))
+      self._logger.info("send ban message to {} failed".format(status.user_id))
 
   async def SendHelpToUser(self, status: ChannelChatUserStatus):
     bot: telegram.Bot = self._tg_app.bot
@@ -692,31 +655,6 @@ class BotChannelChat:
       except Exception as e:
         self._logger.info("send help message to {} failed - {} {}".format(status.user_id, type(e), e))
         await asyncio.sleep(1)
-
-  def GetMinimumSecondsIntervalByPermission(self, permission):
-    span = 0
-    if permission == kChatPermissionGuestUser:
-      span = 28800  # 8 hours
-    elif permission == kChatPermissionNormalUser:
-      span = 64800  # 18 hours
-    elif permission == kChatPermissionVIPUser:
-      span = 172800  # 48 hours
-    elif permission == kChatPermissionAdminUser:
-      span = 1e9
-    return span
-
-  def GetMaximumSecondsIntervalByPermission(self, permission):
-    span = 0
-    if permission == kChatPermissionGuestUser:
-      span = 86400  # 24 hours
-    elif permission == kChatPermissionNormalUser:
-      span = 345600  # 96 hours
-    elif permission == kChatPermissionVIPUser:
-      span = 345600  # 96 hours
-    elif permission == kChatPermissionAdminUser:
-      span = 2e9
-    return span
-
 
 def BotChannelChatMain(bot_token, root_folder="workspace/bot_channel_chat"):
   LoggingAddFileHandler(root_folder + "/logs.txt")
