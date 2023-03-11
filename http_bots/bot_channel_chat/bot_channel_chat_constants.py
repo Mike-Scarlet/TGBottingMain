@@ -47,6 +47,7 @@ user_status_initiate_dict = {
       "join_time": "REAL",
       "last_active_time": "REAL",
       "active_expire_time": "REAL",
+      "fake_name": "TEXT"
     },
     "primary_keys": ["user_id"]
   }

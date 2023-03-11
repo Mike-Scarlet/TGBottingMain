@@ -11,3 +11,4 @@ __pycache__/
 !requirements.txt
 
 workspace/
+playground/examples/

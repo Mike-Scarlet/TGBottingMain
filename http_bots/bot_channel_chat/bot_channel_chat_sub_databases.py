@@ -30,6 +30,7 @@ class UserStatusDatabase(AsyncSingleDBAutoCommitSerializableObject):
           "join_time": user_status.join_time,
           "last_active_time": user_status.last_active_time,
           "active_expire_time": user_status.active_expire_time,
+          "fake_name": user_status.fake_name,
         }, 
         "UserStatus", "OR IGNORE")
       await self.AutoCommitAfter(5.0)
@@ -38,6 +39,14 @@ class UserStatusDatabase(AsyncSingleDBAutoCommitSerializableObject):
     async with self._lock:
       self._op.UpdateFieldFromTable(
         {"join_time": user_status.join_time}, 
+        "UserStatus", 
+        "user_id = {}".format(user_id))
+      await self.AutoCommitAfter(5.0)
+
+  async def UpdateUserFakeName(self, user_id, user_status: ChannelChatUserStatus):
+    async with self._lock:
+      self._op.UpdateFieldFromTable(
+        {"fake_name": user_status.fake_name}, 
         "UserStatus", 
         "user_id = {}".format(user_id))
       await self.AutoCommitAfter(5.0)

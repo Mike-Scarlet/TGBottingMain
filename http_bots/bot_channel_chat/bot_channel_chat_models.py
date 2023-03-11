@@ -24,3 +24,4 @@ class ChannelChatUserStatus:
     self.join_time = 0
     self.last_active_time = 0
     self.active_expire_time = 0
+    self.fake_name = None

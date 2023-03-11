@@ -15,6 +15,7 @@ from python_general_lib.environment_setup.logging_setup import *
 from http_bots.bot_channel_chat.bot_channel_chat_sub_databases import *
 from utils.command_parser import ParsedCommand
 from utils.telegram_asyncio_helper import TGFuncWrap
+import names
 import telegram
 import telegram.ext
 import os, time, datetime
@@ -32,6 +33,9 @@ class BotChannelChat:
     self._forward_process_queue = asyncio.Queue(10000)  # max store 10000 messages
     self._tg_app = None
     self._active_user_count = 0
+
+    # auto add user
+    self._auto_add_user = False
 
     self._ban_messages_access_lock = asyncio.Lock()
     self._ban_messages = set()
@@ -102,6 +106,9 @@ class BotChannelChat:
       if st.active_expire_time == 0 or st.active_expire_time is None:
         st.active_expire_time = st.last_active_time + self.GetMinimumSecondsIntervalByPermission(st.permission) * 2
         await self._user_status_db.UpdateUserLastActiveAndExpireTime(st.user_id, st)
+      if st.fake_name is None:
+        self.AutoSetNameForStatus(st)
+        await self._user_status_db.UpdateUserFakeName(st.user_id, st)
 
     # all worker create
     self._forward_worker_task = loop.create_task(self.ForwardWorkerLoop())
@@ -133,7 +140,10 @@ class BotChannelChat:
     user = update.effective_user
     if user is None:
       return
-    user_st = self.GetUserStatusFromUpdate(update)
+    if self._auto_add_user:
+      user_st = await self.GetOrCreateUserStatusFromUpdate(update)
+    else:
+      user_st = self.GetUserStatusFromUpdate(update)
     if user_st is None:
       self._logger.info("inrecognized user {} - {} sent join".format(user.id, user.full_name))
       await self.ReplyText(update, 'bot error, please contact admin')
@@ -521,6 +531,17 @@ class BotChannelChat:
   def GetUserFromUpdate(self, update: telegram.Update):
     return update.effective_user
 
+  async def GetOrCreateUserStatusFromUpdate(self, update: telegram.Update):
+    try:
+      user_st = self._user_status_dict.get(update.effective_user.id, None)
+      if user_st is None:
+        # create one
+        await self.AddNewUser(update.effective_user.id)
+        user_st = self._user_status_dict.get(update.effective_user.id, None)
+      return user_st
+    except:
+      return None
+
   def GetUserStatusFromUpdate(self, update: telegram.Update):
     try:
       user_st = self._user_status_dict.get(update.effective_user.id, None)
@@ -579,6 +600,7 @@ class BotChannelChat:
     st = ChannelChatUserStatus()
     st.permission = permission
     st.user_id = user_id
+    self.AutoSetNameForStatus(st)
     await self._user_status_db.AddUserStatus(st)
     async with self._user_status_dict_access_lock:
       self._user_status_dict[user_id] = st
@@ -591,6 +613,19 @@ class BotChannelChat:
       await self.ActivateUser(status)
       if update is not None:
         await self.ReplyText(update, 'user id: {}, activated'.format(update.effective_user.id))
+
+  def AutoSetNameForStatus(self, status: ChannelChatUserStatus):
+    if status.fake_name is None:
+      return
+    
+    exist_names = set(map(lambda x: x.fake_name, self._user_status_dict.items()))
+    for _ in range(10):
+      name = names.get_last_name()
+      if name in exist_names:
+        continue
+      else:
+        break
+    status.fake_name = name
 
   async def SetJoinTime(self, status: ChannelChatUserStatus):
     status.join_time = time.time()
