@@ -466,6 +466,7 @@ class BotChannelChat:
           get_item.user_forward_status = kUserForwardStatusFailReasonUnrecognized
           if e.message == "Chat not found":
             try:
+              self._logger.info("invalidate {} since chat not found".format(get_item.to_user_id))
               target_user_st = self._user_status_dict[get_item.to_user_id]
               await self.InactivateUser(target_user_st)
             except:
