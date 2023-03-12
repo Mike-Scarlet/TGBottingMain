@@ -460,9 +460,16 @@ class BotChannelChat:
           # self._logger.info("(retry {}) forward message {} to {}, raised network error {} - {}".format(
           #     try_cnt, get_item.task.task_index, get_item.to_user_id, type(e), e))
           await asyncio.sleep(5.0)  # wait 5 secs
+        except telegram.error.RetryAfter as e:
+          await asyncio.sleep(e.retry_after + 2.0)
         except Exception as e:
           get_item.user_forward_status = kUserForwardStatusFailReasonUnrecognized
           if e.message == "Chat not found":
+            try:
+              target_user_st = self._user_status_dict[get_item.to_user_id]
+              await self.InactivateUser(target_user_st)
+            except:
+              pass
             break
           self._logger.info("forward message {} to {}, raised unrecognized exception".format(
               get_item.task.task_index, get_item.to_user_id))

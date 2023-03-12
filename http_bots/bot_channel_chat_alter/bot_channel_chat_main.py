@@ -172,7 +172,9 @@ class BotChannelChat:
     if user_st.join_time == 0:
       await self.SetJoinTime(user_st)
       await self.SendHelpToUser(user_st)
-    if user_st.permission not in (kChatPermissionInvalidUser,):
+    if user_st.permission in (kChatPermissionAdminUser, kChatPermissionSuperUser):
+      await self.UpdateExpireTimeAndActivate(user_st, update)
+    elif user_st.permission not in (kChatPermissionInvalidUser,):
       await self.ReplyText(update, "you are now joined the chat, send a message to continue")
       await self.ReplyText(update, self.UserStatusToInfoString(user_st))
       # await self.UpdateExpireTimeAndActivate(user_st, update, user_active_expire_offset=0)
@@ -461,8 +463,8 @@ class BotChannelChat:
           user_st = self._user_status_dict.get(get_item.to_user_id, None)
           if user_st is not None:
             user_st.status = kChatStatusInactive
-            user_st.permission = kChatPermissionGuestUser
-            await self._user_status_db.UpdateUserPermission(get_item.to_user_id, user_st)
+            # user_st.permission = kChatPermissionGuestUser
+            # await self._user_status_db.UpdateUserPermission(get_item.to_user_id, user_st)
             await self._user_status_db.UpdateUserCurrentStatus(get_item.to_user_id, user_st)
           get_item.user_forward_status = kUserForwardStatusFailDueToInvalidUser
           break
@@ -477,9 +479,16 @@ class BotChannelChat:
           # self._logger.info("(retry {}) forward message {} to {}, raised network error {} - {}".format(
           #     try_cnt, get_item.task.task_index, get_item.to_user_id, type(e), e))
           await asyncio.sleep(5.0)  # wait 5 secs
+        except telegram.error.RetryAfter as e:
+          await asyncio.sleep(e.retry_after + 2.0)
         except Exception as e:
           get_item.user_forward_status = kUserForwardStatusFailReasonUnrecognized
           if e.message == "Chat not found":
+            try:
+              target_user_st = self._user_status_dict[get_item.to_user_id]
+              await self.InactivateUser(target_user_st)
+            except:
+              pass
             break
           self._logger.info("forward message {} to {}, raised unrecognized exception".format(
               get_item.task.task_index, get_item.to_user_id))
