@@ -1,8 +1,31 @@
 
-from http_bots.bot_channel_chat.bot_channel_chat_models import *
-from python_general_lib.interface.json_serializable import *
+from http_bots.bot_channel_chat_alter.bot_channel_chat_models import *
 from utils.async_single_db_auto_commit_serializable_object import *
-import time
+import time, json
+
+def AutoObjectToJsonHandler(obj):
+  all_sub_props = dir(obj)
+  name_value_dict = {}
+  for prop_name in all_sub_props:
+    if prop_name.startswith("__") and prop_name.endswith("__"):
+      continue
+
+    item = getattr(obj, prop_name)
+    try: 
+      json.dumps(item)
+    except:
+      continue
+
+    name_value_dict[prop_name] = item
+  return name_value_dict
+
+def AutoObjectFromJsonHander(obj, j, allow_not_defined_attr=False):
+  all_sub_props = dir(obj)
+  for key, value in j.items():
+    if not allow_not_defined_attr and not key in all_sub_props:
+      # raise ValueError("cannot auto load json fields")
+      continue
+    setattr(obj, key, value)
 
 class UserStatusDatabase(AsyncSingleDBAutoCommitSerializableObject):
   def __init__(self, db_path: str = None) -> None:

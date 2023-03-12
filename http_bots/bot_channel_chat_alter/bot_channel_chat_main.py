@@ -11,8 +11,21 @@ if __name__ == "__main__":
     need_to_add_path = os.path.dirname(need_to_add_path)
   sys.path.append(need_to_add_path)  # add root directory
 
-from python_general_lib.environment_setup.logging_setup import *
-from http_bots.bot_channel_chat.bot_channel_chat_sub_databases import *
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] %(message)s",
+    # datefmt="[%X]",
+)
+
+def LoggingAddFileHandler(file_path):
+    handler = logging.FileHandler(file_path, "a", encoding='utf-8')
+    formatter = logging.Formatter('%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s')
+    handler.setFormatter(formatter)
+    root_logger = logging.getLogger()
+    root_logger.addHandler(handler)
+
+from http_bots.bot_channel_chat_alter.bot_channel_chat_sub_databases import *
 from utils.command_parser import ParsedCommand
 from utils.telegram_asyncio_helper import TGFuncWrap
 import names
@@ -20,6 +33,8 @@ import telegram
 import telegram.ext
 import os, time, datetime
 import collections
+import typing
+import json
 
 class BotChannelChat:
   _user_status_dict: typing.Dict[int, ChannelChatUserStatus]
@@ -35,7 +50,7 @@ class BotChannelChat:
     self._active_user_count = 0
 
     # auto add user
-    self._auto_add_user = False
+    self._auto_add_user = True
 
     self._ban_messages_access_lock = asyncio.Lock()
     self._ban_messages = set()
@@ -158,7 +173,9 @@ class BotChannelChat:
       await self.SetJoinTime(user_st)
       await self.SendHelpToUser(user_st)
     if user_st.permission not in (kChatPermissionInvalidUser,):
-      await self.UpdateExpireTimeAndActivate(user_st, update, user_active_expire_offset=0)
+      await self.ReplyText(update, "you are now joined the chat, send a message to continue")
+      await self.ReplyText(update, self.UserStatusToInfoString(user_st))
+      # await self.UpdateExpireTimeAndActivate(user_st, update, user_active_expire_offset=0)
     else:
       await self.ReplyText(update, 'sorry but you do not have permission')
 
@@ -659,7 +676,7 @@ class BotChannelChat:
     # notify
     bot: telegram.Bot = self._tg_app.bot
     try:
-      await bot.send_message(status.user_id, "you have been inactive for a while, your active status is set to False, send a video or photo or /join to reactivate")
+      await bot.send_message(status.user_id, "you have been inactive for a while, your active status is set to False, send a video or photo to reactivate")
     except Exception as e:
       self._logger.info("send inactive message to {} failed".format(status.user_id))
 
@@ -695,11 +712,9 @@ class BotChannelChat:
 
   async def SendHelpToUser(self, status: ChannelChatUserStatus):
     bot: telegram.Bot = self._tg_app.bot
-    min_hours = self.GetMinimumSecondsIntervalByPermission(status.permission) // 3600
-    max_hours = self.GetMaximumSecondsIntervalByPermission(status.permission) // 3600
     for _ in range(3):
       try:
-        await bot.send_message(status.user_id, bot_help_info_str.format(min_hours, max_hours))
+        await bot.send_message(status.user_id, bot_help_info_str)
         break
       except Exception as e:
         self._logger.info("send help message to {} failed - {} {}".format(status.user_id, type(e), e))
@@ -770,7 +785,7 @@ if __name__ == "__main__":
   # asyncio.run(ImportUsers())
   # telegram.ext.Application
 
-  with open("config/chat_bot_token.txt", "r") as f:
+  with open("config/mir_bot_token.txt", "r") as f:
     token = f.read()
   # BotChannelChatMain(token)
-  BotChannelChatMain(token, "\\\\192.168.1.220\\home\\telegram_workspace\\bot_channel_chat")
+  BotChannelChatMain(token, "workspace/mir_bot_chat")

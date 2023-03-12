@@ -1,5 +1,5 @@
 
-from http_bots.bot_channel_chat.bot_channel_chat_constants import *
+from http_bots.bot_channel_chat_alter.bot_channel_chat_constants import *
 
 class ForwardTask:
   def __init__(self) -> None:

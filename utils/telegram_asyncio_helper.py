@@ -17,6 +17,8 @@ async def TGFuncWrap(coro, retry_times=3):
     except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
       await asyncio.sleep(retry * 2.5)
       continue
+    except telegram.error.RetryAfter as e:
+      await asyncio.sleep(e.retry_after + 2.0)
     except Exception as e:
       return False, e
   return False, None
